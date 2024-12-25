@@ -1,11 +1,12 @@
-version: "3.8" # You can adjust the version depending on your Docker Compose setup
+version: "3.8"
 
 services:
   vllm:
-    image: vllm/vllm-openai:v0.6.4.post1
-    runtime: nvidia
+    image: IMAGE_REPO:TAG
     environment:
       - HUGGING_FACE_HUB_TOKEN=YOUR_TOKEN
+      - VLLM_CPU_KVCACHE_SPACE=40
+      - VLLM_CPU_OMP_THREADS_BIND=0-29      
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
     ports:
@@ -16,4 +17,3 @@ services:
       --max-model-len YOUR_LEN
       --api-key YOUR_APIKEY
     restart: always
-# Mark --dtype=YOUR_TYPE
