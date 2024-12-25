@@ -3,15 +3,15 @@ version: "3.8"
 services:
   vllm:
     image: IMAGE_REPO:TAG
+    privileged: true
     environment:
       - HUGGING_FACE_HUB_TOKEN=YOUR_TOKEN
-      - VLLM_CPU_KVCACHE_SPACE=40
-      - VLLM_CPU_OMP_THREADS_BIND=0-29      
+      - VLLM_CPU_KVCACHE_SPACE=12
+      - VLLM_CPU_OMP_THREADS_BIND=0-7      
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
     ports:
       - "8000:8000"
-    ipc: host
     command: |
       --model YOUR_MODEL
       --max-model-len YOUR_LEN
