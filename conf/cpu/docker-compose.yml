@@ -17,3 +17,4 @@ services:
       --max-model-len YOUR_LEN
       --api-key YOUR_APIKEY
     restart: always
+    ipc: host
