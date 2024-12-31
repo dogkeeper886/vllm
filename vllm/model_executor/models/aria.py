@@ -32,9 +32,8 @@ from vllm.model_executor.models.utils import (AutoWeightsLoader, WeightsMapper,
                                               maybe_prefix,
                                               merge_multimodal_embeddings)
 from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.multimodal.base import MultiModalInputs
 from vllm.multimodal.image import cached_get_image_processor
-from vllm.multimodal.inputs import NestedTensors
+from vllm.multimodal.inputs import MultiModalKwargs, NestedTensors
 from vllm.multimodal.utils import (cached_get_tokenizer,
                                    repeat_and_pad_placeholder_tokens)
 from vllm.sequence import IntermediateTensors
@@ -451,7 +450,7 @@ def get_max_multimodal_tokens(ctx):
 
 
 def input_mapper_for_aria(ctx, data):
-    return MultiModalInputs(data)
+    return MultiModalKwargs(data)
 
 
 def input_processor(ctx, llm_inputs):
@@ -522,6 +521,15 @@ class AriaForConditionalGeneration(nn.Module, SupportsMultiModal):
     This model combines a vision tower, a multi-modal projector, and a language
     model to perform tasks that involve both image and text inputs.
     """
+    hf_to_vllm_mapper = WeightsMapper(
+        orig_to_new_prefix={
+            "language_model.model": "language_model",
+            "language_model.lm_head": "lm_head",
+        },
+        orig_to_new_suffix={
+            "router.weight": "router_weight",
+        },
+    )
 
     def __init__(
         self,
@@ -663,15 +671,6 @@ class AriaForConditionalGeneration(nn.Module, SupportsMultiModal):
         return next_tokens
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
-        hf_to_vllm_mapper = WeightsMapper(
-            orig_to_new_prefix={
-                "language_model.model": "language_model",
-                "language_model.lm_head": "lm_head",
-            },
-            orig_to_new_suffix={
-                "router.weight": "router_weight",
-            },
-        )
 
         loader = AutoWeightsLoader(self)
-        loader.load_weights(weights, mapper=hf_to_vllm_mapper)
+        loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)

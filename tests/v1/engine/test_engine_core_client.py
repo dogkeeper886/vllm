@@ -29,9 +29,9 @@ def make_request(params: SamplingParams) -> EngineCoreRequest:
         request_id=str(uuid.uuid4()),
         prompt=PROMPT,
         prompt_token_ids=PROMPT_TOKENS,
-        mm_data=None,
+        mm_inputs=None,
+        mm_hashes=None,
         mm_placeholders=None,
-        mm_processor_kwargs=None,
         sampling_params=params,
         eos_token_id=None,
         arrival_time=time.time(),
@@ -86,11 +86,10 @@ def test_engine_core_client(monkeypatch, multiprocessing_mode: bool):
             UsageContext.UNKNOWN_CONTEXT)
         executor_class = AsyncLLM._get_executor_cls(vllm_config)
         client = EngineCoreClient.make_client(
-            vllm_config,
-            executor_class,
-            UsageContext.UNKNOWN_CONTEXT,
             multiprocess_mode=multiprocessing_mode,
             asyncio_mode=False,
+            vllm_config=vllm_config,
+            executor_class=executor_class,
         )
 
         MAX_TOKENS = 20
@@ -158,11 +157,10 @@ async def test_engine_core_client_asyncio(monkeypatch):
             usage_context=UsageContext.UNKNOWN_CONTEXT)
         executor_class = AsyncLLM._get_executor_cls(vllm_config)
         client = EngineCoreClient.make_client(
-            vllm_config,
-            executor_class,
-            UsageContext.UNKNOWN_CONTEXT,
             multiprocess_mode=True,
             asyncio_mode=True,
+            vllm_config=vllm_config,
+            executor_class=executor_class,
         )
 
         MAX_TOKENS = 20
