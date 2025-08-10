@@ -37,6 +37,8 @@ def query_bitblas_supported_quant_types(has_zp: bool,
                              capability_tuple.to_int())
 
     if device_capability < 70:
+        # BitBlas requires compute capability 7.0 or higher
+        # Tesla K80 (3.7) and other older GPUs are not supported
         return []
 
     if has_zp:

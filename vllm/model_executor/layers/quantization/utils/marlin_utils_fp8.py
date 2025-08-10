@@ -17,6 +17,8 @@ logger = init_logger(__name__)
 
 
 def is_fp8_marlin_supported():
+    # FP8 Marlin requires compute capability 8.0 or higher (Ampere+)
+    # Tesla K80 (3.7) is not supported
     return current_platform.has_device_capability(80)
 
 

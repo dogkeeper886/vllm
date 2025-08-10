@@ -68,8 +68,11 @@ class CudaPlatformBase(Platform):
               ) and self.has_device_capability(60):
             # Pascal, Volta and Turing NVIDIA GPUs, BF16 is not supported
             return [torch.float16, torch.float32]
-        # Kepler and Maxwell NVIDIA GPUs, only FP32 is supported,
-        # though vLLM doesn't support these GPUs.
+        elif self.has_device_capability(37):
+            # Kepler architecture (Tesla K80, K40, etc.)
+            # FP16 support is limited but available, FP32 is primary
+            return [torch.float16, torch.float32]
+        # Older GPUs (Maxwell and earlier), only FP32 is supported
         return [torch.float32]
 
     @classmethod
@@ -330,8 +333,15 @@ class CudaPlatformBase(Platform):
 
             # FlexAttention is the default for older GPUs
             else:
-                logger.info_once("Using FlexAttention backend on V1 engine.")
-                return FLEX_ATTENTION_V1
+                # Special handling for Tesla K80 and Kepler architecture
+                if cls.has_device_capability(37) and not cls.has_device_capability(60):
+                    # Kepler GPUs (Tesla K80, K40, etc.) - use XFormers for better compatibility
+                    logger.info_once("Using XFormers backend on V1 engine for "
+                                   "Kepler architecture (Tesla K80).")
+                    return XFORMERS_V1
+                else:
+                    logger.info_once("Using FlexAttention backend on V1 engine.")
+                    return FLEX_ATTENTION_V1
 
             assert not is_default_backend_supported
 
@@ -379,11 +389,19 @@ class CudaPlatformBase(Platform):
 
         target_backend = _Backend.FLASH_ATTN
         if not cls.has_device_capability(80):
-            # Volta and Turing NVIDIA GPUs.
-            logger.info(
-                "Cannot use FlashAttention-2 backend for Volta and Turing "
-                "GPUs.")
-            target_backend = _Backend.XFORMERS
+            # Check for Tesla K80 and older GPUs
+            if cls.has_device_capability(37) and not cls.has_device_capability(60):
+                # Kepler architecture (Tesla K80, K40, etc.)
+                logger.info(
+                    "Cannot use FlashAttention-2 backend for Kepler "
+                    "architecture GPUs (Tesla K80, K40). Using XFormers.")
+                target_backend = _Backend.XFORMERS
+            else:
+                # Volta and Turing NVIDIA GPUs.
+                logger.info(
+                    "Cannot use FlashAttention-2 backend for Volta and Turing "
+                    "GPUs.")
+                target_backend = _Backend.XFORMERS
         elif dtype not in (torch.float16, torch.bfloat16):
             logger.info(
                 "Cannot use FlashAttention-2 backend for dtype other than "

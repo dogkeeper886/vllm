@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  vllm-k80:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.tesla-k80
+    image: vllm:tesla-k80
+    container_name: vllm-tesla-k80
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - CUDA_VISIBLE_DEVICES=0
+      # Force basic inference mode for K80 compatibility
+      - VLLM_ATTENTION_BACKEND=XFORMERS
+      - VLLM_DISABLE_QUANTIZATION=1
+      - VLLM_WORKER_USE_RAY=0
+    volumes:
+      - ../:/workspace/vllm
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    ports:
+      - "8000:8000"
+    shm_size: 2g
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: >
+      bash -c "
+      echo 'Starting vLLM with Tesla K80 support...' &&
+      python -m vllm.entrypoints.openai.api_server \
+        --model microsoft/DialoGPT-small \
+        --dtype float32 \
+        --disable-log-requests \
+        --enforce-eager \
+        --max-model-len 1024 \
+        --gpu-memory-utilization 0.8 \
+        --port 8000 \
+        --host 0.0.0.0
+      "
+
+  # Alternative service for interactive development
+  vllm-k80-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.tesla-k80
+    image: vllm:tesla-k80
+    container_name: vllm-tesla-k80-dev
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - VLLM_ATTENTION_BACKEND=XFORMERS
+      - VLLM_DISABLE_QUANTIZATION=1
+    volumes:
+      - ../:/workspace/vllm
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    tty: true
+    stdin_open: true
+    shm_size: 2g
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: bash
