@@ -6,9 +6,11 @@ This directory contains Docker configuration for running vLLM on Tesla K80 GPUs 
 
 ### Host System Requirements
 - **NVIDIA Driver**: Version 470.x (last driver supporting Tesla K80)
+  - Driver 470 supports CUDA 11.0 through 11.4 (CUDA 11.5+ not supported)
 - **Docker**: Version 20.10 or later
 - **NVIDIA Container Toolkit**: Latest version
-- **Tesla K80** with at least 12GB VRAM
+- **Tesla K80** with 12GB VRAM per GPU (dual-GPU card)
+- **Host OS**: Linux distribution compatible with driver 470
 
 ### Driver Installation
 ```bash
@@ -27,7 +29,15 @@ sudo reboot
 
 ### NVIDIA Container Toolkit Installation
 ```bash
-# Ubuntu/Debian
+# Ubuntu/Debian (Modern method - Ubuntu 20.04+)
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+  sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+  sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+sudo apt update && sudo apt install -y nvidia-container-toolkit
+sudo systemctl restart docker
+
+# Ubuntu/Debian (Legacy method - Ubuntu 18.04 and older)
 distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
 curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
 curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
@@ -176,6 +186,11 @@ Ensure TORCH_CUDA_ARCH_LIST is set correctly:
 ```bash
 # Check the Dockerfile has:
 ENV TORCH_CUDA_ARCH_LIST="3.7"
+ENV CUDA_ARCH_LIST="3.7"
+
+# If building manually, set environment variables:
+export TORCH_CUDA_ARCH_LIST="3.7"
+export CUDA_ARCH_LIST="3.7"
 ```
 
 ### Performance Expectations
@@ -187,11 +202,13 @@ ENV TORCH_CUDA_ARCH_LIST="3.7"
 ## Limitations
 
 ### Unsupported Features
-- FlashAttention (requires compute capability ≥8.0)
-- FP8/INT8 quantization
+- FlashAttention-2 (requires compute capability ≥8.0) 
+- FlashAttention-1 (requires compute capability ≥7.0)
+- FP8/INT8/FP4 quantization (BitBlas ≥7.0, Marlin ≥8.0)
 - Tensor parallelism across multiple GPUs
-- Advanced MoE models
+- Advanced MoE models with modern kernels
 - Speculative decoding
+- CUTLASS kernels (require newer architectures)
 
 ### Supported Features
 - Basic text generation
@@ -200,6 +217,27 @@ ENV TORCH_CUDA_ARCH_LIST="3.7"
 - Single GPU inference
 - OpenAI-compatible API
 
+## Important Notes
+
+### Tesla K80 Architecture Details
+- **Dual-GPU Design**: Tesla K80 contains two GK210 GPUs on one card
+- **Compute Capability**: 3.7 (Kepler architecture, released 2014)
+- **Memory**: 12GB GDDR5 per GPU (24GB total, but vLLM uses single GPU)
+- **CUDA Support**: Maximum CUDA 11.4 with driver 470.x
+
+### Known Limitations
+- **Legacy Support**: Tesla K80 is at minimum supported compute capability
+- **Performance**: Significantly slower than modern GPUs (5-10x slower)
+- **Power Consumption**: High power draw (~300W) for relatively low performance
+- **Driver End-of-Life**: Driver 470 is EOL, no future updates
+
+### Development vs Production
+This Tesla K80 support is intended for:
+- ✅ **Development and testing**
+- ✅ **Learning and experimentation** 
+- ✅ **Legacy hardware utilization**
+- ❌ **Production deployments** (use modern GPUs)
+
 ## Support
 
 For issues specific to Tesla K80 support, please:
@@ -207,3 +245,4 @@ For issues specific to Tesla K80 support, please:
 2. Verify driver version 470.x is installed
 3. Ensure using recommended model sizes
 4. Include GPU info (`nvidia-smi`) in bug reports
+5. Note that Tesla K80 is legacy hardware with limited support
