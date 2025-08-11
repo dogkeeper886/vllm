@@ -1,84 +1,66 @@
-# Dockerfile for Tesla K80 support with vLLM
-# Uses CUDA 11.4.3 on Rocky Linux 8 - last CUDA version supporting Tesla K80
-FROM nvidia/cuda:11.4.3-devel-rockylinux8
+# Tesla K80 vLLM Docker Image
+# Multi-stage build for Tesla K80 (compute capability 3.7) support
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
+# Build stage
+FROM vllm-tesla-k80-builder:latest as builder
+
+# Copy vLLM source code
+COPY . /workspace/vllm/
+WORKDIR /workspace/vllm
+
+# Initialize git repository for version detection
+RUN git init . && \
+    git config user.email "builder@tesla-k80.local" && \
+    git config user.name "Tesla K80 Builder" && \
+    git add . && \
+    git commit -m "Initial commit for build"
+
+# Build vLLM CUDA extensions only (dependencies already in builder)
+# Skip build isolation and dependency downloads - all deps pre-installed in builder
+# Disable Flash Attention and other features that require CUDA 11.6+
+RUN TORCH_CUDA_ARCH_LIST="3.7" \
+    CUDA_ARCH_LIST="3.7" \
+    VLLM_TARGET_DEVICE="cuda" \
+    VLLM_USE_FLASH_ATTN_V2=0 \
+    CMAKE_ARGS="-DCMAKE_VERBOSE_MAKEFILE=ON -DVLLM_USE_FLASH_ATTN_V2=OFF" \
+    MAX_JOBS=4 \
+    pip install --no-build-isolation --no-deps -e .
+
+# Runtime stage
+FROM nvidia/cuda:11.4.3-runtime-ubuntu20.04
+
+# Avoid interactive prompts
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Tesla K80 runtime environment
 ENV CUDA_HOME=/usr/local/cuda
 ENV PATH=/usr/local/cuda/bin:$PATH
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 
-# Set CUDA architecture for Tesla K80 (compute capability 3.7)
-ENV TORCH_CUDA_ARCH_LIST="3.7"
-ENV CUDA_ARCH_LIST="3.7"
+# Install minimal runtime dependencies
+RUN apt-get update && apt-get install -y \
+    python3.9 \
+    python3.9-distutils \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install system dependencies
-RUN dnf update -y && \
-    dnf install -y \
-        python3.9 \
-        python3.9-pip \
-        python3.9-devel \
-        git \
-        wget \
-        gcc \
-        gcc-c++ \
-        make \
-        cmake \
-        which \
-        ninja-build \
-        && \
-    dnf clean all
+# Set Python 3.9 as default
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.9 1 && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1
 
-# Create symlinks for python
-RUN ln -sf /usr/bin/python3.9 /usr/bin/python3 && \
-    ln -sf /usr/bin/python3.9 /usr/bin/python && \
-    ln -sf /usr/bin/pip3.9 /usr/bin/pip3 && \
-    ln -sf /usr/bin/pip3.9 /usr/bin/pip
-
-# Upgrade pip
-RUN python -m pip install --upgrade pip
-
-# Install PyTorch with CUDA 11.3 support (compatible with 11.4 and Tesla K80)
-# Using older PyTorch version that still supports compute capability 3.7
-RUN pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 torchaudio==0.12.1 \
-    --extra-index-url https://download.pytorch.org/whl/cu113
-
-# Install other dependencies needed for vLLM
-RUN pip install \
-    ninja \
-    packaging \
-    wheel \
-    flash-attn==2.3.6 \
-    xformers==0.0.20 \
-    transformers \
-    tokenizers \
-    sentencepiece \
-    numpy \
-    psutil \
-    ray
+# Copy Python environment from builder
+COPY --from=builder /usr/local/lib/python3.9/dist-packages/ /usr/local/lib/python3.9/dist-packages/
+COPY --from=builder /usr/local/bin/ /usr/local/bin/
+COPY --from=builder /workspace/vllm/ /workspace/vllm/
 
 # Set working directory
-WORKDIR /workspace
-
-# Copy vLLM source code
-COPY . /workspace/vllm/
-
-# Set working directory to vLLM
 WORKDIR /workspace/vllm
 
-# Build vLLM with Tesla K80 support
-# Force compilation for compute capability 3.7
-RUN TORCH_CUDA_ARCH_LIST="3.7" \
-    CUDA_ARCH_LIST="3.7" \
-    MAX_JOBS=4 \
-    python setup.py develop
+# Default command
+CMD ["python", "-c", "import vllm; print('vLLM Tesla K80 ready!')"]
 
-# Set the default command
-CMD ["python", "-c", "import vllm; print('vLLM with Tesla K80 support ready!')"]
-
-# Add labels for documentation
+# Labels
 LABEL maintainer="Tesla K80 Support"
-LABEL description="vLLM with Tesla K80 (compute capability 3.7) support on Rocky Linux 8"
+LABEL description="vLLM with Tesla K80 (compute capability 3.7) support"
 LABEL cuda.version="11.4.3"
-LABEL gpu.arch="Tesla K80"
 LABEL compute.capability="3.7"
+LABEL driver.version="470"

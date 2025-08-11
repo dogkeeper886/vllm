@@ -79,14 +79,34 @@ endif()
 #
 find_package(Torch REQUIRED)
 
+# Find CUDA toolkit to create CUDA::cudart and CUDA::cuda_driver targets for Tesla K80
+if(VLLM_GPU_LANG STREQUAL "CUDA")
+    find_package(CUDAToolkit REQUIRED)
+    if(NOT TARGET CUDA::cudart)
+        # Create CUDA::cudart target if it doesn't exist
+        add_library(CUDA::cudart SHARED IMPORTED)
+        set_target_properties(CUDA::cudart PROPERTIES
+            IMPORTED_LOCATION "/usr/local/cuda/lib64/libcudart.so"
+            INTERFACE_INCLUDE_DIRECTORIES "/usr/local/cuda/include")
+    endif()
+    if(NOT TARGET CUDA::cuda_driver)
+        # Create CUDA::cuda_driver target if it doesn't exist  
+        add_library(CUDA::cuda_driver SHARED IMPORTED)
+        set_target_properties(CUDA::cuda_driver PROPERTIES
+            IMPORTED_LOCATION "/usr/local/cuda/lib64/stubs/libcuda.so"
+            INTERFACE_INCLUDE_DIRECTORIES "/usr/local/cuda/include")
+    endif()
+endif()
+
 # Supported NVIDIA architectures.
 # This check must happen after find_package(Torch) because that's when CMAKE_CUDA_COMPILER_VERSION gets defined
 if(DEFINED CMAKE_CUDA_COMPILER_VERSION AND
    CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8)
-  set(CUDA_SUPPORTED_ARCHS "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.1;12.0")
+  set(CUDA_SUPPORTED_ARCHS "3.7;7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.1;12.0")
 else()
-  set(CUDA_SUPPORTED_ARCHS "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0")
+  set(CUDA_SUPPORTED_ARCHS "3.7;7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0")
 endif()
+message(STATUS "Tesla K80 (compute 3.7) support enabled")
 
 #
 # Forward the non-CUDA device extensions to external CMake scripts.
@@ -901,6 +921,27 @@ endif()
 if (VLLM_GPU_LANG STREQUAL "CUDA")
     include(cmake/external_projects/flashmla.cmake)
 
-    # vllm-flash-attn should be last as it overwrites some CMake functions
-    include(cmake/external_projects/vllm_flash_attn.cmake)
+    # Flash Attention requires CUDA 11.6+ and compute capability 7.0+
+    # Skip for Tesla K80 (compute 3.7) and CUDA < 11.6
+    if(DEFINED CMAKE_CUDA_COMPILER_VERSION AND 
+       CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 11.6)
+        # Check if any of the target architectures support Flash Attention (7.0+)
+        set(FLASH_ATTN_SUPPORTED FALSE)
+        foreach(_ARCH ${CUDA_ARCHS})
+            if(_ARCH VERSION_GREATER_EQUAL "7.0")
+                set(FLASH_ATTN_SUPPORTED TRUE)
+                break()
+            endif()
+        endforeach()
+        
+        if(FLASH_ATTN_SUPPORTED)
+            # vllm-flash-attn should be last as it overwrites some CMake functions  
+            include(cmake/external_projects/vllm_flash_attn.cmake)
+            message(STATUS "Flash Attention enabled for CUDA ${CMAKE_CUDA_COMPILER_VERSION} with architectures: ${CUDA_ARCHS}")
+        else()
+            message(STATUS "Flash Attention disabled - no compatible GPU architectures (requires 7.0+)")
+        endif()
+    else()
+        message(STATUS "Flash Attention disabled - CUDA ${CMAKE_CUDA_COMPILER_VERSION} < 11.6 required")
+    endif()
 endif ()

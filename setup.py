@@ -205,6 +205,12 @@ class cmake_build_ext(build_ext):
         # Make sure we use the nvcc from CUDA_HOME
         if _is_cuda():
             cmake_args += [f'-DCMAKE_CUDA_COMPILER={CUDA_HOME}/bin/nvcc']
+        
+        # Support CMAKE_ARGS environment variable for additional args
+        cmake_args_env = os.environ.get('CMAKE_ARGS')
+        if cmake_args_env:
+            cmake_args += cmake_args_env.split()
+            
         subprocess.check_call(
             ['cmake', ext.cmake_lists_dir, *build_tool, *cmake_args],
             cwd=self.build_temp)
