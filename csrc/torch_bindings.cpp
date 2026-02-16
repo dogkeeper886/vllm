@@ -225,7 +225,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.impl("batched_rotary_embedding", torch::kCUDA, &batched_rotary_embedding);
 
   // Quantization ops
-#ifndef USE_ROCM
+#if !defined(USE_ROCM) && !defined(VLLM_BUILD_LEGACY_CUDA)
   // Quantized GEMM for AQLM.
   ops.def(
       "aqlm_gemm(Tensor input, Tensor codes, Tensor codebooks, "
@@ -379,7 +379,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
 
   ops.def("ggml_moe_get_block_size", &ggml_moe_get_block_size);
 
-#ifndef USE_ROCM
+#if !defined(USE_ROCM) && !defined(VLLM_BUILD_LEGACY_CUDA)
   // marlin_qqq_gemm for QQQ.
   ops.def(
       "marlin_qqq_gemm(Tensor a, Tensor b_q_weight, "
@@ -614,7 +614,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "int pad_slot_id) -> ()");
   ops.impl("selective_scan_fwd", torch::kCUDA, &selective_scan_fwd);
 
-#ifndef USE_ROCM
+#if !defined(USE_ROCM) && !defined(VLLM_BUILD_LEGACY_CUDA)
   // Compute per-token-group FP8 quantized tensor and scaling factor.
   ops.def(
       "per_token_group_fp8_quant(Tensor input, Tensor! output_q, Tensor! "

@@ -1,0 +1,11 @@
+# Requirements for legacy CUDA builds (e.g. Tesla K80, sm_37, CUDA 11.4)
+# Compatible with PyTorch 2.0.x built from source
+-r common.txt
+
+# Note: torch, torchvision, torchaudio are NOT listed here because they
+# must be built from source with TORCH_CUDA_ARCH_LIST="3.7" for K80 support.
+# xformers is also excluded — it requires sm_70+.
+# vllm-flash-attn is excluded — it requires sm_80+.
+
+# Ray for pipeline parallelism (use compatible version)
+ray>=2.9.0

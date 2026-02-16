@@ -148,23 +148,41 @@ inline __device__ uint32_t float2_to_half2(float2 f) {
 
 // Vector addition.
 inline __device__ uint16_t add(uint16_t a, uint16_t b) {
-  uint16_t c;
 #ifndef USE_ROCM
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 530
+  uint16_t c;
   asm volatile("add.f16 %0, %1, %2;\n" : "=h"(c) : "h"(a), "h"(b));
-#else
-  asm volatile("v_add_f16 %0, %1, %2;\n" : "=v"(c) : "v"(a), "v"(b));
-#endif
   return c;
+  #else
+  // sm < 53: FP16 arithmetic not natively supported, use FP32 fallback
+  float fa = half_to_float(a);
+  float fb = half_to_float(b);
+  return float_to_half(fa + fb);
+  #endif
+#else
+  uint16_t c;
+  asm volatile("v_add_f16 %0, %1, %2;\n" : "=v"(c) : "v"(a), "v"(b));
+  return c;
+#endif
 }
 
 inline __device__ uint32_t add(uint32_t a, uint32_t b) {
-  uint32_t c;
 #ifndef USE_ROCM
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 530
+  uint32_t c;
   asm volatile("add.f16x2 %0, %1, %2;\n" : "=r"(c) : "r"(a), "r"(b));
-#else
-  asm volatile("v_pk_add_f16 %0, %1, %2;\n" : "=v"(c) : "v"(a), "v"(b));
-#endif
   return c;
+  #else
+  // sm < 53: FP16x2 arithmetic not natively supported, use FP32 fallback
+  float2 fa = half2_to_float2(a);
+  float2 fb = half2_to_float2(b);
+  return float2_to_half2(make_float2(fa.x + fb.x, fa.y + fb.y));
+  #endif
+#else
+  uint32_t c;
+  asm volatile("v_pk_add_f16 %0, %1, %2;\n" : "=v"(c) : "v"(a), "v"(b));
+  return c;
+#endif
 }
 
 inline __device__ uint2 add(uint2 a, uint2 b) {
@@ -207,24 +225,42 @@ inline __device__ Float8_ add(uint4 a, Float8_ fb) {
 // Vector multiplication.
 template <>
 inline __device__ uint16_t mul(uint16_t a, uint16_t b) {
-  uint16_t c;
 #ifndef USE_ROCM
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 530
+  uint16_t c;
   asm volatile("mul.f16 %0, %1, %2;\n" : "=h"(c) : "h"(a), "h"(b));
-#else
-  asm volatile("v_mul_f16 %0, %1, %2;\n" : "=v"(c) : "v"(a), "v"(b));
-#endif
   return c;
+  #else
+  // sm < 53: FP16 arithmetic not natively supported, use FP32 fallback
+  float fa = half_to_float(a);
+  float fb = half_to_float(b);
+  return float_to_half(fa * fb);
+  #endif
+#else
+  uint16_t c;
+  asm volatile("v_mul_f16 %0, %1, %2;\n" : "=v"(c) : "v"(a), "v"(b));
+  return c;
+#endif
 }
 
 template <>
 inline __device__ uint32_t mul(uint32_t a, uint32_t b) {
-  uint32_t c;
 #ifndef USE_ROCM
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 530
+  uint32_t c;
   asm volatile("mul.f16x2 %0, %1, %2;\n" : "=r"(c) : "r"(a), "r"(b));
-#else
-  asm volatile("v_pk_mul_f16 %0, %1, %2;\n" : "=v"(c) : "v"(a), "v"(b));
-#endif
   return c;
+  #else
+  // sm < 53: FP16x2 arithmetic not natively supported, use FP32 fallback
+  float2 fa = half2_to_float2(a);
+  float2 fb = half2_to_float2(b);
+  return float2_to_half2(make_float2(fa.x * fb.x, fa.y * fb.y));
+  #endif
+#else
+  uint32_t c;
+  asm volatile("v_pk_mul_f16 %0, %1, %2;\n" : "=v"(c) : "v"(a), "v"(b));
+  return c;
+#endif
 }
 
 template <>
@@ -329,17 +365,27 @@ inline __device__ Float8_ mul(uint16_t a, uint4 b) {
 
 // Vector fused multiply-add.
 inline __device__ uint32_t fma(uint32_t a, uint32_t b, uint32_t c) {
-  uint32_t d;
 #ifndef USE_ROCM
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 530
+  uint32_t d;
   asm volatile("fma.rn.f16x2 %0, %1, %2, %3;\n"
                : "=r"(d)
                : "r"(a), "r"(b), "r"(c));
+  return d;
+  #else
+  // sm < 53: FP16x2 FMA not natively supported, use FP32 fallback
+  float2 fa = half2_to_float2(a);
+  float2 fb = half2_to_float2(b);
+  float2 fc = half2_to_float2(c);
+  return float2_to_half2(make_float2(fa.x * fb.x + fc.x, fa.y * fb.y + fc.y));
+  #endif
 #else
+  uint32_t d;
   asm volatile("v_pk_fma_f16 %0, %1, %2, %3;\n"
                : "=v"(d)
                : "v"(a), "v"(b), "v"(c));
-#endif
   return d;
+#endif
 }
 
 inline __device__ uint32_t fma(uint16_t a, uint32_t b, uint32_t c) {

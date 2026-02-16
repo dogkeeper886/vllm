@@ -1,0 +1,32 @@
+services:
+  vllm:
+    image: vllm37:latest
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ports:
+      - "8000:8000"
+    volumes:
+      - ${HF_HOME:-~/.cache/huggingface}:/root/.cache/huggingface
+    environment:
+      - VLLM_USE_V1=0
+      - VLLM_ATTENTION_BACKEND=TORCH_SDPA
+      - NCCL_DEBUG=INFO
+    command:
+      - "--model"
+      - "${MODEL:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}"
+      - "--dtype"
+      - "${DTYPE:-float32}"
+      - "--enforce-eager"
+      - "--tensor-parallel-size"
+      - "${TP_SIZE:-4}"
+      - "--max-model-len"
+      - "${MAX_MODEL_LEN:-2048}"
+      - "--gpu-memory-utilization"
+      - "${GPU_MEM_UTIL:-0.85}"
+    restart: unless-stopped
