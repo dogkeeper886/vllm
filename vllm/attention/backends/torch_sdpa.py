@@ -255,6 +255,17 @@ class TorchSDPAImpl(AttentionImpl[TorchSDPAMetadata]):
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
         self.attn_type = attn_type
 
+        # Check if F.scaled_dot_product_attention supports 'scale' kwarg
+        # (added in PyTorch 2.1). Cache for use in forward().
+        try:
+            import torch.nn.functional as _F
+            _F.scaled_dot_product_attention(
+                torch.empty(1, 1, 1, 1), torch.empty(1, 1, 1, 1),
+                torch.empty(1, 1, 1, 1), scale=1.0)
+            self._sdpa_has_scale = True
+        except TypeError:
+            self._sdpa_has_scale = False
+
         supported_head_sizes = PagedAttention.get_supported_head_sizes()
         if head_size not in supported_head_sizes:
             raise ValueError(
@@ -485,12 +496,24 @@ class TorchSDPAImpl(AttentionImpl[TorchSDPAMetadata]):
                 attn_mask = bias.unsqueeze(0)  # [1, num_heads, q_len, kv_len]
                 is_causal = False  # Causal already in mask
 
-            out = F.scaled_dot_product_attention(
-                q, k, v,
-                attn_mask=attn_mask,
-                scale=self.scale,
-                is_causal=is_causal,
-            )
+            if self._sdpa_has_scale:
+                out = F.scaled_dot_product_attention(
+                    q, k, v,
+                    attn_mask=attn_mask,
+                    scale=self.scale,
+                    is_causal=is_causal,
+                )
+            else:
+                # PyTorch < 2.1: scale not supported, pre-scale query
+                import math
+                default_scale = 1.0 / math.sqrt(q.size(-1))
+                if self.scale != default_scale:
+                    q = q * (self.scale / default_scale)
+                out = F.scaled_dot_product_attention(
+                    q, k, v,
+                    attn_mask=attn_mask,
+                    is_causal=is_causal,
+                )
             # out: [1, num_heads, q_len, head_size] -> [q_len, num_heads, head]
             out = out.squeeze(0).transpose(0, 1)
             output[q_start:q_end] = out

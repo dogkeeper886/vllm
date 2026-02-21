@@ -20,16 +20,22 @@ COPY . /usr/local/src/vllm37
 
 WORKDIR /usr/local/src/vllm37
 
+# Install build system requirements
+RUN pip install --no-cache-dir "setuptools>=77.0.3,<80.0.0" "setuptools-scm>=8.0"
+
 # Install Python dependencies (use K80-specific requirements)
 RUN pip install --no-cache-dir -r requirements/cuda_k80.txt 2>/dev/null || \
     pip install --no-cache-dir -r requirements/common.txt
 
 # Build and install vLLM with legacy CUDA flags
+# --no-deps prevents pip from pulling torch 2.7.1 which would overwrite
+# our custom PyTorch 2.0.1 built with CUDA 11.4 + sm_37 support.
 RUN CUDA_HOME=/usr/local/cuda-11.4 \
     TORCH_CUDA_ARCH_LIST="3.7" \
     VLLM_BUILD_LEGACY_CUDA=1 \
+    CMAKE_POLICY_VERSION_MINIMUM=3.5 \
     MAX_JOBS=${MAX_JOBS} \
-    pip install -e . --no-build-isolation
+    pip install -e . --no-build-isolation --no-deps
 
 # ============================================================================
 # Runtime configuration

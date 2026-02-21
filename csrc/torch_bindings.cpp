@@ -6,6 +6,38 @@
 #include <torch/library.h>
 #include <torch/version.h>
 
+// PyTorch 2.0.x uses c10::optional (its own implementation), not std::optional.
+// vLLM functions use std::optional<T>, so we need compatibility shims:
+// 1. Type inference: getMaybeFakeTypePtr_ so PyTorch can infer schema from
+//    function pointers with std::optional<T> parameters.
+// 2. IValue conversion: generic_to so the dispatcher can convert IValue to
+//    std::optional<T> at runtime.
+#ifdef VLLM_BUILD_LEGACY_CUDA
+#include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
+
+// 1. Type inference for std::optional<T> — needed at .so load time
+namespace c10 {
+namespace detail {
+template <class T, bool fake>
+struct getMaybeFakeTypePtr_<std::optional<T>, fake> final {
+  static const auto& call() {
+    static auto inner_type = getMaybeFakeTypePtr_<T, fake>::call();
+    static auto type = OptionalType::get(inner_type);
+    return type;
+  }
+};
+}  // namespace detail
+
+// 2. IValue → std::optional<T> conversion — needed at dispatch time
+template <typename T>
+std::optional<T> generic_to(IValue ivalue, _fake_type<std::optional<T>>) {
+  if (ivalue.isNone()) return std::nullopt;
+  return std::move(ivalue).to<T>();
+}
+}  // namespace c10
+#endif
+
 // Note on op signatures:
 // The X_meta signatures are for the meta functions corresponding to op X.
 // They must be kept in sync with the signature for X. Generally, only
@@ -111,9 +143,11 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.def("silu_and_mul(Tensor! result, Tensor input) -> ()");
   ops.impl("silu_and_mul", torch::kCUDA, &silu_and_mul);
 
+#if !defined(VLLM_BUILD_LEGACY_CUDA)
   ops.def(
       "silu_and_mul_quant(Tensor! result, Tensor input, Tensor scale) -> ()");
   ops.impl("silu_and_mul_quant", torch::kCUDA, &silu_and_mul_quant);
+#endif
 
   ops.def("mul_and_silu(Tensor! out, Tensor input) -> ()");
   ops.impl("mul_and_silu", torch::kCUDA, &mul_and_silu);
@@ -181,6 +215,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.impl("apply_repetition_penalties_", torch::kCUDA,
            &apply_repetition_penalties_);
 
+#if !defined(VLLM_BUILD_LEGACY_CUDA)
   // Layernorm-quant
   // Apply Root Mean Square (RMS) Normalization to the input tensor.
   ops.def(
@@ -205,6 +240,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "Tensor? scale_ub, Tensor!? residual) -> ()");
   ops.impl("rms_norm_dynamic_per_token_quant", torch::kCUDA,
            &rms_norm_dynamic_per_token_quant);
+#endif // !VLLM_BUILD_LEGACY_CUDA
 
   // Rotary embedding
   // Apply GPT-NeoX or GPT-J style rotary embedding to query and key.
@@ -346,6 +382,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   // conditionally compiled so impl registrations are in source file
 #endif
 
+#if !defined(VLLM_BUILD_LEGACY_CUDA)
   // Dequantization for GGML.
   ops.def(
       "ggml_dequantize(Tensor W, int type, SymInt m, SymInt n, ScalarType? "
@@ -378,6 +415,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.impl("ggml_moe_a8_vec", torch::kCUDA, &ggml_moe_a8_vec);
 
   ops.def("ggml_moe_get_block_size", &ggml_moe_get_block_size);
+#endif // !VLLM_BUILD_LEGACY_CUDA
 
 #if !defined(USE_ROCM) && !defined(VLLM_BUILD_LEGACY_CUDA)
   // marlin_qqq_gemm for QQQ.
@@ -553,6 +591,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.impl("cutlass_scaled_mm_supports_fp4", &cutlass_scaled_mm_supports_fp4);
 #endif
 
+#if !defined(VLLM_BUILD_LEGACY_CUDA)
   // Quantized GEMM for GPTQ.
   // Note: even though the C++ inferred schema is correct for this op, it seems
   // to prevent the meta function registry.
@@ -566,7 +605,9 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   // Post processing for GPTQ.
   ops.def("gptq_shuffle(Tensor! q_weight, Tensor q_perm, int bit) -> ()");
   ops.impl("gptq_shuffle", torch::kCUDA, &gptq_shuffle);
+#endif
 
+#if !defined(VLLM_BUILD_LEGACY_CUDA)
   // Compute FP8 quantized tensor for given scaling factor.
   ops.def(
       "static_scaled_fp8_quant(Tensor! result, Tensor input, Tensor scale) -> "
@@ -587,6 +628,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "()");
   ops.impl("dynamic_per_token_scaled_fp8_quant", torch::kCUDA,
            &dynamic_per_token_scaled_fp8_quant);
+#endif // !VLLM_BUILD_LEGACY_CUDA
 
   // Compute int8 quantized tensor for given scaling factor.
   ops.def(

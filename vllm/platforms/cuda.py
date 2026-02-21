@@ -34,7 +34,8 @@ pynvml = import_pynvml()
 
 # pytorch 2.5 uses cudnn sdpa by default, which will cause crash on some models
 # see https://github.com/huggingface/diffusers/issues/9704 for details
-torch.backends.cuda.enable_cudnn_sdp(False)
+if hasattr(torch.backends.cuda, 'enable_cudnn_sdp'):
+    torch.backends.cuda.enable_cudnn_sdp(False)
 
 
 def with_nvml_context(fn: Callable[_P, _R]) -> Callable[_P, _R]:

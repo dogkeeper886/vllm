@@ -8,7 +8,10 @@ import torch
 from vllm.platforms import current_platform
 
 if current_platform.is_cuda():
-    from vllm.vllm_flash_attn.layers.rotary import apply_rotary_emb
+    try:
+        from vllm.vllm_flash_attn.layers.rotary import apply_rotary_emb
+    except (ImportError, ModuleNotFoundError):
+        apply_rotary_emb = None  # Not available on legacy CUDA (e.g. sm_37)
 
 
 # common functions
@@ -57,7 +60,7 @@ def apply_rotary_emb_dispatch(x: torch.Tensor, cos: torch.Tensor,
         is_neox_style: Whether to use the Neox-style or GPT-J-style rotary
             positional embeddings.
     """
-    if current_platform.is_cuda():
+    if current_platform.is_cuda() and apply_rotary_emb is not None:
         return apply_rotary_emb(x.unsqueeze(0), cos, sin,
                                 not is_neox_style).squeeze(0)
     else:

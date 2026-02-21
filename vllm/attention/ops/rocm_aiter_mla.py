@@ -96,7 +96,7 @@ if current_platform.is_rocm():
     if is_torch_equal_or_newer("2.7.0"):
         tags = ()
     else:
-        tags = (torch.Tag.needs_fixed_stride_order, ),
+        tags = (getattr(torch.Tag, 'needs_fixed_stride_order', None), ),
     direct_register_custom_op(op_name="rocm_aiter_mla_decode_fwd",
                               op_func=mla_decode_fwd_impl,
                               mutates_args=["o"],

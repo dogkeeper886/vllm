@@ -98,7 +98,11 @@ DINLINE half downcast_s(float val) {
 // for some reason when compiling with Pytorch, the + operator for half and
 // bfloat is disabled so we call the intrinsics directly
 DINLINE half& assign_add(half& a, half b) {
+#if __CUDA_ARCH__ >= 530
   a = __hadd(a, b);
+#else
+  a = __float2half(__half2float(a) + __half2float(b));
+#endif
   return a;
 }
 DINLINE float& assign_add(float& a, float b) { return a += b; }

@@ -19,9 +19,18 @@ from typing import Any, Optional
 
 import torch
 from torch.distributed import ProcessGroup, TCPStore
-from torch.distributed.distributed_c10d import (Backend, PrefixStore,
-                                                _get_default_timeout,
-                                                _unregister_process_group)
+from torch.distributed.distributed_c10d import Backend, PrefixStore
+try:
+    from torch.distributed.distributed_c10d import _get_default_timeout
+except ImportError:
+    import datetime
+    def _get_default_timeout(backend):
+        return datetime.timedelta(minutes=30)
+try:
+    from torch.distributed.distributed_c10d import _unregister_process_group
+except ImportError:
+    def _unregister_process_group(name):
+        pass
 from torch.distributed.rendezvous import rendezvous
 
 import vllm.envs as envs

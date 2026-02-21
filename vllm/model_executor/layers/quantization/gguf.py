@@ -155,8 +155,8 @@ try:
     )
     fused_mul_mat_gguf = torch.ops.vllm._fused_mul_mat_gguf
 
-except AttributeError as error:
-    raise error
+except AttributeError:
+    fused_mul_mat_gguf = _fused_mul_mat_gguf
 
 
 def _fused_moe_gguf(
@@ -267,8 +267,8 @@ try:
     )
     fused_moe_gguf = torch.ops.vllm._fused_moe_gguf
 
-except AttributeError as error:
-    raise error
+except AttributeError:
+    fused_moe_gguf = _fused_moe_gguf
 
 
 def _apply_gguf_embedding(
@@ -313,8 +313,8 @@ try:
     )
     apply_gguf_embedding = torch.ops.vllm._apply_gguf_embedding
 
-except AttributeError as error:
-    raise error
+except AttributeError:
+    apply_gguf_embedding = _apply_gguf_embedding
 
 
 class GGUFLinearMethod(LinearMethodBase):

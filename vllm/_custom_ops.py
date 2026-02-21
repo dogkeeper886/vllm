@@ -32,7 +32,12 @@ else:
     try:
         from torch.library import register_fake
     except ImportError:
-        from torch.library import impl_abstract as register_fake
+        try:
+            from torch.library import impl_abstract as register_fake
+        except ImportError:
+            # PyTorch < 2.3 has neither register_fake nor impl_abstract
+            def register_fake(fn):
+                return lambda name: fn
 
 
 # page attention ops
@@ -673,12 +678,19 @@ def cutlass_scaled_fp4_mm(a: torch.Tensor, b: torch.Tensor,
 
 
 def cutlass_scaled_mm_supports_fp8(cuda_device_capability: int) -> bool:
-    return torch.ops._C.cutlass_scaled_mm_supports_fp8(cuda_device_capability)
+    try:
+        return torch.ops._C.cutlass_scaled_mm_supports_fp8(
+            cuda_device_capability)
+    except AttributeError:
+        return False
 
 
 def cutlass_scaled_mm_supports_block_fp8(cuda_device_capability: int) -> bool:
-    return torch.ops._C.cutlass_scaled_mm_supports_block_fp8(
-        cuda_device_capability)
+    try:
+        return torch.ops._C.cutlass_scaled_mm_supports_block_fp8(
+            cuda_device_capability)
+    except AttributeError:
+        return False
 
 
 def cutlass_scaled_mm(a: torch.Tensor,
@@ -768,7 +780,11 @@ def cutlass_sparse_scaled_mm_supported(cuda_device_capability: int) -> bool:
 
 
 def cutlass_group_gemm_supported(cuda_device_capability: int) -> bool:
-    return torch.ops._C.cutlass_group_gemm_supported(cuda_device_capability)
+    try:
+        return torch.ops._C.cutlass_group_gemm_supported(
+            cuda_device_capability)
+    except AttributeError:
+        return False
 
 def cutlass_sparse_compress(a: torch.Tensor) \
     -> tuple[torch.Tensor, torch.Tensor]:

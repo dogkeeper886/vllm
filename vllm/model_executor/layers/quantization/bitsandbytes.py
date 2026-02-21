@@ -400,8 +400,8 @@ try:
                               dispatch_key=current_platform.dispatch_key)
     apply_bnb_4bit = torch.ops.vllm.apply_bnb_4bit
 
-except AttributeError as error:
-    raise error
+except AttributeError:
+    apply_bnb_4bit = _apply_bnb_4bit
 
 
 class BitsAndBytesMoEMethod(FusedMoEMethodBase):

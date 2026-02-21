@@ -996,7 +996,12 @@ def init_distributed_environment(
         assert distributed_init_method is not None, (
             "distributed_init_method must be provided when initializing "
             "distributed environment")
-        if not torch.distributed.is_backend_available(backend):
+        _is_backend_available = getattr(
+            torch.distributed, 'is_backend_available',
+            lambda b: b == "nccl" and torch.distributed.is_nccl_available()
+            or b == "gloo" and torch.distributed.is_gloo_available()
+            or b == "mpi" and torch.distributed.is_mpi_available())
+        if not _is_backend_available(backend):
             logger.warning(
                 "Distributed backend %s is not available; "
                 "falling back to gloo.", backend)

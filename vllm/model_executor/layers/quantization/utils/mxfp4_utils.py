@@ -118,8 +118,9 @@ try:
         fake_impl=_dequant_mxfp4_fake,
     )
     dequant_mxfp4 = torch.ops.vllm.dequant_mxfp4
-except AttributeError as error:
-    raise error
+except AttributeError:
+    # Custom op registration not available (PyTorch < 2.4), use directly
+    dequant_mxfp4 = _dequant_mxfp4
 
 try:
     direct_register_custom_op(
@@ -129,5 +130,6 @@ try:
         fake_impl=_quant_dequant_mxfp4_fake,
     )
     quant_dequant_mxfp4 = torch.ops.vllm.quant_dequant_mxfp4
-except AttributeError as error:
-    raise error
+except AttributeError:
+    # Custom op registration not available (PyTorch < 2.4), use directly
+    quant_dequant_mxfp4 = _quant_dequant_mxfp4

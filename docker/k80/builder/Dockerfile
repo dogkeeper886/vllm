@@ -154,6 +154,7 @@ RUN cd /usr/local/src && \
     CUDA_HOME=${CUDA_HOME} \
     TORCH_CUDA_ARCH_LIST="3.7" \
     CMAKE_PREFIX_PATH=/usr/local \
+    CMAKE_POLICY_VERSION_MINIMUM=3.5 \
     USE_CUDA=1 \
     USE_CUDNN=1 \
     USE_NCCL=1 \
