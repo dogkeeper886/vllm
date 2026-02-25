@@ -35,14 +35,30 @@ RUN CUDA_HOME=/usr/local/cuda-11.4 \
     VLLM_BUILD_LEGACY_CUDA=1 \
     CMAKE_POLICY_VERSION_MINIMUM=3.5 \
     MAX_JOBS=${MAX_JOBS} \
-    pip install -e . --no-build-isolation --no-deps
+    pip install . --no-build-isolation --no-deps
+
+# Downgrade numpy to 1.x (PyTorch 2.0.1 was compiled against numpy 1.x)
+RUN pip install --no-cache-dir "numpy<2"
+
+# Switch WORKDIR away from source tree so Python doesn't shadow the
+# installed package (site-packages) with the source directory.
+WORKDIR /workspace
 
 # ============================================================================
 # Runtime configuration
 # ============================================================================
+# NVIDIA Container Toolkit requires these to expose GPUs inside the container
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 ENV VLLM_USE_V1=0
 ENV CUDA_HOME=/usr/local/cuda-11.4
 ENV VLLM_ATTENTION_BACKEND=TORCH_SDPA
+# PyTorch 2.0 dynamo has broken SymInt handling — disable entirely
+ENV TORCHDYNAMO_DISABLE=1
+# K80 is PCIe-only (no NVLink) — P2P causes kernel timeouts with TP>1
+ENV NCCL_P2P_DISABLE=1
+# Safer multiprocessing for PyTorch 2.0 distributed
+ENV VLLM_WORKER_MULTIPROC_METHOD=spawn
 
 EXPOSE 8000
 
@@ -52,4 +68,5 @@ CMD ["--model", "TinyLlama/TinyLlama-1.1B-Chat-v1.0", \
      "--enforce-eager", \
      "--tensor-parallel-size", "4", \
      "--max-model-len", "2048", \
-     "--gpu-memory-utilization", "0.85"]
+     "--gpu-memory-utilization", "0.85", \
+     "--swap-space", "0"]

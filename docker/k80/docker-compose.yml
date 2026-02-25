@@ -1,7 +1,8 @@
 services:
   vllm:
-    image: vllm37:latest
+    image: vllm37-local:latest
     runtime: nvidia
+    shm_size: '4g'
     deploy:
       resources:
         reservations:
@@ -17,6 +18,9 @@ services:
       - VLLM_USE_V1=0
       - VLLM_ATTENTION_BACKEND=TORCH_SDPA
       - NCCL_DEBUG=INFO
+      - NCCL_P2P_DISABLE=1
+      - TORCHDYNAMO_DISABLE=1
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
     command:
       - "--model"
       - "${MODEL:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}"
@@ -29,4 +33,6 @@ services:
       - "${MAX_MODEL_LEN:-2048}"
       - "--gpu-memory-utilization"
       - "${GPU_MEM_UTIL:-0.85}"
+      - "--swap-space"
+      - "0"
     restart: unless-stopped
