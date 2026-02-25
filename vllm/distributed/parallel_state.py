@@ -273,8 +273,9 @@ class GroupCoordinator:
                 self.cpu_group, 1 << 22, 6)
 
         from vllm.platforms import current_platform
-        self.use_custom_op_call = (current_platform.is_cuda_alike()
-                                   or current_platform.is_tpu())
+        from vllm.utils import supports_custom_op
+        self.use_custom_op_call = supports_custom_op() and (
+            current_platform.is_cuda_alike() or current_platform.is_tpu())
 
         self.use_cpu_custom_send_recv = (current_platform.is_cpu() and hasattr(
             torch.ops._C, "init_shm_manager"))
