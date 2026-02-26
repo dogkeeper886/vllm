@@ -1084,7 +1084,7 @@ direct_register_custom_op(
     mutates_args=["hidden_states"],
     fake_impl=inplace_fused_experts_fake,
     tags=(() if is_torch_equal_or_newer("2.7.0") else
-          (torch.Tag.needs_fixed_stride_order, )),
+          (getattr(torch.Tag, 'needs_fixed_stride_order', None), )),
 )
 
 
@@ -1167,7 +1167,7 @@ direct_register_custom_op(
     op_func=flashinfer_fused_moe_blockscale_fp8,
     mutates_args=[],
     fake_impl=flashinfer_fused_moe_blockscale_fp8_fake,
-    tags=(torch.Tag.needs_fixed_stride_order, ),
+    tags=(getattr(torch.Tag, 'needs_fixed_stride_order', None), ),
 )
 
 
@@ -1258,7 +1258,7 @@ direct_register_custom_op(
     op_func=flashinfer_fused_moe_per_tensor_scale_fp8,
     mutates_args=["hidden_states"],
     fake_impl=flashinfer_fused_moe_per_tensor_scale_fp8_fake,
-    tags=(torch.Tag.needs_fixed_stride_order, ),
+    tags=(getattr(torch.Tag, 'needs_fixed_stride_order', None), ),
 )
 
 
@@ -1331,7 +1331,7 @@ direct_register_custom_op(
     mutates_args=[],
     fake_impl=outplace_fused_experts_fake,
     tags=(() if is_torch_equal_or_newer("2.7.0") else
-          (torch.Tag.needs_fixed_stride_order, )),
+          (getattr(torch.Tag, 'needs_fixed_stride_order', None), )),
 )
 
 

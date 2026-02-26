@@ -71,8 +71,17 @@ _NUM_WARMUP_ITERS = 2
 TModelInputForGPU = TypeVar('TModelInputForGPU', bound="ModelInputForGPU")
 
 # For now, bump up cache limits for recompilations during CUDA graph warmups.
-torch._dynamo.config.cache_size_limit = 128
-torch._dynamo.config.accumulated_cache_size_limit = 128
+# On PyTorch < 2.4, disable dynamo entirely — its SymInt handling is broken
+# and causes "unhashable type: 'SymInt'" errors with tensor parallelism.
+if hasattr(torch, '_dynamo'):
+    from vllm.utils import supports_custom_op
+    if not supports_custom_op():
+        torch._dynamo.config.suppress_errors = True
+    try:
+        torch._dynamo.config.cache_size_limit = 128
+        torch._dynamo.config.accumulated_cache_size_limit = 128
+    except AttributeError:
+        pass  # PyTorch < 2.4 may not have all dynamo config options
 
 
 @dataclass(frozen=True)

@@ -273,8 +273,9 @@ class GroupCoordinator:
                 self.cpu_group, 1 << 22, 6)
 
         from vllm.platforms import current_platform
-        self.use_custom_op_call = (current_platform.is_cuda_alike()
-                                   or current_platform.is_tpu())
+        from vllm.utils import supports_custom_op
+        self.use_custom_op_call = supports_custom_op() and (
+            current_platform.is_cuda_alike() or current_platform.is_tpu())
 
         self.use_cpu_custom_send_recv = (current_platform.is_cpu() and hasattr(
             torch.ops._C, "init_shm_manager"))
@@ -996,7 +997,12 @@ def init_distributed_environment(
         assert distributed_init_method is not None, (
             "distributed_init_method must be provided when initializing "
             "distributed environment")
-        if not torch.distributed.is_backend_available(backend):
+        _is_backend_available = getattr(
+            torch.distributed, 'is_backend_available',
+            lambda b: b == "nccl" and torch.distributed.is_nccl_available()
+            or b == "gloo" and torch.distributed.is_gloo_available()
+            or b == "mpi" and torch.distributed.is_mpi_available())
+        if not _is_backend_available(backend):
             logger.warning(
                 "Distributed backend %s is not available; "
                 "falling back to gloo.", backend)

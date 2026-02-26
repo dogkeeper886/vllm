@@ -34,7 +34,8 @@ pynvml = import_pynvml()
 
 # pytorch 2.5 uses cudnn sdpa by default, which will cause crash on some models
 # see https://github.com/huggingface/diffusers/issues/9704 for details
-torch.backends.cuda.enable_cudnn_sdp(False)
+if hasattr(torch.backends.cuda, 'enable_cudnn_sdp'):
+    torch.backends.cuda.enable_cudnn_sdp(False)
 
 
 def with_nvml_context(fn: Callable[_P, _R]) -> Callable[_P, _R]:
@@ -68,8 +69,8 @@ class CudaPlatformBase(Platform):
               ) and self.has_device_capability(60):
             # Pascal, Volta and Turing NVIDIA GPUs, BF16 is not supported
             return [torch.float16, torch.float32]
-        # Kepler and Maxwell NVIDIA GPUs, only FP32 is supported,
-        # though vLLM doesn't support these GPUs.
+        # Kepler and Maxwell NVIDIA GPUs (e.g. Tesla K80, sm_37).
+        # Only FP32 is supported.
         return [torch.float32]
 
     @classmethod
@@ -185,6 +186,17 @@ class CudaPlatformBase(Platform):
                             "CUTLASS_MLA backend.")
 
         compilation_config = vllm_config.compilation_config
+
+        # Kepler GPUs (sm < 70): disable CUDA graphs and force eager mode.
+        # CUDA graphs require features not available on these older GPUs.
+        if not cls.has_device_capability(70):
+            compilation_config.use_cudagraph = False
+            if model_config is not None:
+                model_config.enforce_eager = True
+            logger.info(
+                "Kepler GPU detected (sm < 70): forcing eager mode and "
+                "disabling CUDA graphs.")
+
         if (envs.VLLM_ALL2ALL_BACKEND == "deepep_high_throughput"
                 and parallel_config.data_parallel_size > 1
                 and compilation_config.use_cudagraph):
@@ -349,6 +361,13 @@ class CudaPlatformBase(Platform):
             return FLEX_ATTENTION_V1
 
         # Backends for V0 engine
+        # Kepler GPUs (sm < 60): use Torch SDPA backend.
+        # FlashAttention and xformers require sm_70+/sm_80+.
+        if not cls.has_device_capability(60):
+            logger.info(
+                "Using Torch SDPA attention backend for Kepler GPU (sm < 60).")
+            return "vllm.attention.backends.torch_sdpa.TorchSDPABackend"
+
         if selected_backend == _Backend.FLASHINFER:
             logger.info("Using FlashInfer backend.")
             if cls.has_device_capability(100):
@@ -370,6 +389,9 @@ class CudaPlatformBase(Platform):
             logger.info("Using DifferentialFlashAttention backend.")
             return ("vllm.attention.backends.differential_flash_attn."
                     "DifferentialFlashAttentionBackend")
+        elif selected_backend == _Backend.TORCH_SDPA:
+            logger.info("Using Torch SDPA attention backend.")
+            return "vllm.attention.backends.torch_sdpa.TorchSDPABackend"
         elif selected_backend == _Backend.FLASH_ATTN:
             pass
         elif selected_backend:
@@ -449,11 +471,17 @@ class CudaPlatformBase(Platform):
 
     @classmethod
     def supports_v1(cls, model_config: "ModelConfig") -> bool:
+        # V1 engine uses FlexAttention which requires PyTorch 2.5+
+        # and features not available on Kepler GPUs (sm < 60).
+        if not cls.has_device_capability(60):
+            return False
         return True
 
     @classmethod
     def use_custom_allreduce(cls) -> bool:
-        return True
+        # Custom allreduce requires features not available on Kepler GPUs.
+        # Use NCCL-only communication for K80 and similar (sm < 70).
+        return cls.has_device_capability(70)
 
     @classmethod
     def get_piecewise_backend_cls(cls) -> str:

@@ -180,7 +180,7 @@ STR_DTYPE_TO_TORCH_DTYPE = {
     "fp8_e4m3": torch.uint8,
     "fp8_e5m2": torch.uint8,
     "int8": torch.int8,
-    "fp8_inc": torch.float8_e4m3fn,
+    "fp8_inc": getattr(torch, 'float8_e4m3fn', torch.uint8),
 }
 
 TORCH_DTYPE_TO_NUMPY_DTYPE = {
@@ -2475,7 +2475,11 @@ class _PlaceholderModuleAttr(_PlaceholderBase):
 
 
 # create a library to hold the custom op
-vllm_lib = Library("vllm", "FRAGMENT")  # noqa
+# PyTorch 2.0 doesn't support "FRAGMENT" kind, fall back to "DEF"
+try:
+    vllm_lib = Library("vllm", "FRAGMENT")  # noqa
+except ValueError:
+    vllm_lib = Library("vllm", "DEF")  # noqa
 
 
 def direct_register_custom_op(
@@ -2504,12 +2508,11 @@ def direct_register_custom_op(
     """
     if not supports_custom_op():
         from vllm.platforms import current_platform
-        assert not current_platform.is_cuda_alike(), (
-            "cuda platform needs torch>=2.4 to support custom op, "
-            "chances are you are using an old version of pytorch "
-            "or a custom build of pytorch. It is recommended to "
-            "use vLLM in a fresh new environment and let it install "
-            "the required dependencies.")
+        if current_platform.is_cuda_alike():
+            import logging
+            logging.getLogger(__name__).warning(
+                "torch.library.custom_op not available (PyTorch < 2.4). "
+                "Skipping custom op registration for '%s'.", op_name)
         return
 
     import torch.library

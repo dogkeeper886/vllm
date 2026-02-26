@@ -1,5 +1,7 @@
 #pragma once
 
+#include <variant>
+
 // For TORCH_CHECK
 #include <torch/library.h>
 

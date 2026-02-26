@@ -529,6 +529,7 @@ void topk_softmax(
             topk,
             stream);
     }
+#ifndef VLLM_BUILD_LEGACY_CUDA
     else if (topk_indices.scalar_type() == at::ScalarType::UInt32)
     {
         vllm::moe::topkGatingSoftmaxKernelLauncher(
@@ -542,6 +543,7 @@ void topk_softmax(
             topk,
             stream);
     }
+#endif
     else {
         assert(topk_indices.scalar_type() == at::ScalarType::Int64);
         vllm::moe::topkGatingSoftmaxKernelLauncher(

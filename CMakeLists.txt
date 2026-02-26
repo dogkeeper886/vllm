@@ -79,13 +79,18 @@ endif()
 #
 find_package(Torch REQUIRED)
 
+# CMake 4.x requires explicit CUDAToolkit import for CUDA::cudart etc.
+if(VLLM_TARGET_DEVICE STREQUAL "cuda")
+  find_package(CUDAToolkit REQUIRED)
+endif()
+
 # Supported NVIDIA architectures.
 # This check must happen after find_package(Torch) because that's when CMAKE_CUDA_COMPILER_VERSION gets defined
 if(DEFINED CMAKE_CUDA_COMPILER_VERSION AND
    CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8)
-  set(CUDA_SUPPORTED_ARCHS "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.1;12.0")
+  set(CUDA_SUPPORTED_ARCHS "3.7;7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.1;12.0")
 else()
-  set(CUDA_SUPPORTED_ARCHS "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0")
+  set(CUDA_SUPPORTED_ARCHS "3.7;7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0")
 endif()
 
 #
@@ -215,14 +220,24 @@ if(VLLM_GPU_LANG STREQUAL "CUDA")
   message(STATUS "Enabling cumem allocator extension.")
   # link against cuda driver library
   list(APPEND CUMEM_LIBS CUDA::cuda_driver)
-  define_gpu_extension_target(
-    cumem_allocator
-    DESTINATION vllm
-    LANGUAGE CXX
-    SOURCES ${VLLM_CUMEM_EXT_SRC}
-    LIBRARIES ${CUMEM_LIBS}
-    USE_SABI 3.8
-    WITH_SOABI)
+  if(VLLM_BUILD_LEGACY_CUDA)
+    define_gpu_extension_target(
+      cumem_allocator
+      DESTINATION vllm
+      LANGUAGE CXX
+      SOURCES ${VLLM_CUMEM_EXT_SRC}
+      LIBRARIES ${CUMEM_LIBS}
+      WITH_SOABI)
+  else()
+    define_gpu_extension_target(
+      cumem_allocator
+      DESTINATION vllm
+      LANGUAGE CXX
+      SOURCES ${VLLM_CUMEM_EXT_SRC}
+      LIBRARIES ${CUMEM_LIBS}
+      USE_SABI 3.8
+      WITH_SOABI)
+  endif()
 endif()
 
 #
@@ -253,7 +268,34 @@ set(VLLM_EXT_SRC
   "csrc/custom_all_reduce.cu"
   "csrc/torch_bindings.cpp")
 
-if(VLLM_GPU_LANG STREQUAL "CUDA")
+# Legacy CUDA build mode for older GPUs (e.g. sm_37 / Tesla K80).
+# When ON, skips all CUTLASS-dependent kernels (Marlin, Machete, scaled_mm, etc.)
+# and CUTLASS fetch entirely. Also removes FP8-dependent source files that
+# require PyTorch 2.1+ Float8 types. Set via env var or cmake flag.
+if(DEFINED ENV{VLLM_BUILD_LEGACY_CUDA})
+  option(VLLM_BUILD_LEGACY_CUDA "Build without CUTLASS for legacy CUDA GPUs" ON)
+else()
+  option(VLLM_BUILD_LEGACY_CUDA "Build without CUTLASS for legacy CUDA GPUs" OFF)
+endif()
+
+if(VLLM_BUILD_LEGACY_CUDA)
+  message(STATUS "Legacy CUDA build enabled — skipping CUTLASS and dependent kernels")
+  # Pass define to C++ code so torch_bindings.cpp can guard op registrations
+  add_compile_definitions(VLLM_BUILD_LEGACY_CUDA)
+  # Disable Stable ABI — may not work with older PyTorch
+  set(USE_SABI OFF)
+  # Remove FP8-dependent files (require PyTorch 2.1+ Float8 types)
+  # and FP16-intrinsic files (require sm_53+ for __hfma2, __hadd2, etc.)
+  list(REMOVE_ITEM VLLM_EXT_SRC
+    "csrc/quantization/fp8/common.cu"
+    "csrc/quantization/fused_kernels/fused_layernorm_dynamic_per_token_quant.cu"
+    "csrc/quantization/activation_kernels.cu"
+    "csrc/layernorm_quant_kernels.cu"
+    "csrc/quantization/gptq/q_gemm.cu"
+    "csrc/quantization/gguf/gguf_kernel.cu")
+endif()
+
+if(VLLM_GPU_LANG STREQUAL "CUDA" AND NOT VLLM_BUILD_LEGACY_CUDA)
   SET(CUTLASS_ENABLE_HEADERS_ONLY ON CACHE BOOL "Enable only the header library")
 
   # Set CUTLASS_REVISION. Used for FetchContent. Also fixes some bogus messages when building.
@@ -745,7 +787,16 @@ if(VLLM_GPU_LANG STREQUAL "CUDA")
                      "found in CUDA target architectures")
     endif()
   endif()
-# if CUDA endif
+# if CUDA (non-legacy) endif
+endif()
+
+if(VLLM_GPU_LANG STREQUAL "CUDA" AND VLLM_BUILD_LEGACY_CUDA)
+  # Legacy CUDA build: only core kernels, no CUTLASS dependencies.
+  # VLLM_EXT_SRC already has the core files listed above.
+  set_gencode_flags_for_srcs(
+    SRCS "${VLLM_EXT_SRC}"
+    CUDA_ARCHS "${CUDA_ARCHS}")
+  message(STATUS "Legacy CUDA build: only core kernels will be compiled")
 endif()
 
 if (VLLM_GPU_LANG STREQUAL "HIP")
@@ -757,23 +808,36 @@ if (VLLM_GPU_LANG STREQUAL "HIP")
 endif()
 
 message(STATUS "Enabling C extension.")
-define_gpu_extension_target(
-  _C
-  DESTINATION vllm
-  LANGUAGE ${VLLM_GPU_LANG}
-  SOURCES ${VLLM_EXT_SRC}
-  COMPILE_FLAGS ${VLLM_GPU_FLAGS}
-  ARCHITECTURES ${VLLM_GPU_ARCHES}
-  INCLUDE_DIRECTORIES ${CUTLASS_INCLUDE_DIR}
-  INCLUDE_DIRECTORIES ${CUTLASS_TOOLS_UTIL_INCLUDE_DIR}
-  USE_SABI 3
-  WITH_SOABI)
+if(VLLM_BUILD_LEGACY_CUDA)
+  define_gpu_extension_target(
+    _C
+    DESTINATION vllm
+    LANGUAGE ${VLLM_GPU_LANG}
+    SOURCES ${VLLM_EXT_SRC}
+    COMPILE_FLAGS ${VLLM_GPU_FLAGS}
+    ARCHITECTURES ${VLLM_GPU_ARCHES}
+    WITH_SOABI)
+else()
+  define_gpu_extension_target(
+    _C
+    DESTINATION vllm
+    LANGUAGE ${VLLM_GPU_LANG}
+    SOURCES ${VLLM_EXT_SRC}
+    COMPILE_FLAGS ${VLLM_GPU_FLAGS}
+    ARCHITECTURES ${VLLM_GPU_ARCHES}
+    INCLUDE_DIRECTORIES ${CUTLASS_INCLUDE_DIR}
+    INCLUDE_DIRECTORIES ${CUTLASS_TOOLS_UTIL_INCLUDE_DIR}
+    USE_SABI 3
+    WITH_SOABI)
+endif()
 
 # If CUTLASS is compiled on NVCC >= 12.5, it by default uses
 # cudaGetDriverEntryPointByVersion as a wrapper to avoid directly calling the
 # driver API. This causes problems when linking with earlier versions of CUDA.
 # Setting this variable sidesteps the issue by calling the driver directly.
-target_compile_definitions(_C PRIVATE CUTLASS_ENABLE_DIRECT_CUDA_DRIVER_CALL=1)
+if(NOT VLLM_BUILD_LEGACY_CUDA)
+  target_compile_definitions(_C PRIVATE CUTLASS_ENABLE_DIRECT_CUDA_DRIVER_CALL=1)
+endif()
 
 #
 # _moe_C extension
@@ -784,11 +848,11 @@ set(VLLM_MOE_EXT_SRC
   "csrc/moe/moe_align_sum_kernels.cu"
   "csrc/moe/topk_softmax_kernels.cu")
 
-if(VLLM_GPU_LANG STREQUAL "CUDA")
+if(VLLM_GPU_LANG STREQUAL "CUDA" AND NOT VLLM_BUILD_LEGACY_CUDA)
   list(APPEND VLLM_MOE_EXT_SRC "csrc/moe/moe_wna16.cu")
 endif()
 
-if(VLLM_GPU_LANG STREQUAL "CUDA")
+if(VLLM_GPU_LANG STREQUAL "CUDA" AND NOT VLLM_BUILD_LEGACY_CUDA)
   set(MOE_PERMUTE_SRC
       "csrc/moe/permute_unpermute_kernels/moe_permute_unpermute_kernel.cu"
       "csrc/moe/moe_permute_unpermute_op.cu")
@@ -800,7 +864,7 @@ set_gencode_flags_for_srcs(
   SRCS "${VLLM_MOE_EXT_SRC}"
   CUDA_ARCHS "${CUDA_ARCHS}")
 
-if(VLLM_GPU_LANG STREQUAL "CUDA")
+if(VLLM_GPU_LANG STREQUAL "CUDA" AND NOT VLLM_BUILD_LEGACY_CUDA)
   set(VLLM_MOE_WNA16_SRC
     "csrc/moe/moe_wna16.cu")
 
@@ -865,17 +929,28 @@ if(VLLM_GPU_LANG STREQUAL "CUDA")
 endif()
 
 message(STATUS "Enabling moe extension.")
-define_gpu_extension_target(
-  _moe_C
-  DESTINATION vllm
-  LANGUAGE ${VLLM_GPU_LANG}
-  SOURCES ${VLLM_MOE_EXT_SRC}
-  COMPILE_FLAGS ${VLLM_GPU_FLAGS}
-  ARCHITECTURES ${VLLM_GPU_ARCHES}
-  INCLUDE_DIRECTORIES ${CUTLASS_INCLUDE_DIR}
-  INCLUDE_DIRECTORIES ${CUTLASS_TOOLS_UTIL_INCLUDE_DIR}
-  USE_SABI 3
-  WITH_SOABI)
+if(VLLM_BUILD_LEGACY_CUDA)
+  define_gpu_extension_target(
+    _moe_C
+    DESTINATION vllm
+    LANGUAGE ${VLLM_GPU_LANG}
+    SOURCES ${VLLM_MOE_EXT_SRC}
+    COMPILE_FLAGS ${VLLM_GPU_FLAGS}
+    ARCHITECTURES ${VLLM_GPU_ARCHES}
+    WITH_SOABI)
+else()
+  define_gpu_extension_target(
+    _moe_C
+    DESTINATION vllm
+    LANGUAGE ${VLLM_GPU_LANG}
+    SOURCES ${VLLM_MOE_EXT_SRC}
+    COMPILE_FLAGS ${VLLM_GPU_FLAGS}
+    ARCHITECTURES ${VLLM_GPU_ARCHES}
+    INCLUDE_DIRECTORIES ${CUTLASS_INCLUDE_DIR}
+    INCLUDE_DIRECTORIES ${CUTLASS_TOOLS_UTIL_INCLUDE_DIR}
+    USE_SABI 3
+    WITH_SOABI)
+endif()
 
 if(VLLM_GPU_LANG STREQUAL "HIP")
   #
@@ -898,7 +973,8 @@ if(VLLM_GPU_LANG STREQUAL "HIP")
 endif()
 
 # For CUDA we also build and ship some external projects.
-if (VLLM_GPU_LANG STREQUAL "CUDA")
+# Skip for legacy CUDA builds (flash-attn requires sm_80+, flashmla likewise).
+if (VLLM_GPU_LANG STREQUAL "CUDA" AND NOT VLLM_BUILD_LEGACY_CUDA)
     include(cmake/external_projects/flashmla.cmake)
 
     # vllm-flash-attn should be last as it overwrites some CMake functions

@@ -22,7 +22,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, m) {
       "                     Tensor! num_tokens_post_pad) -> ()");
   m.impl("moe_align_block_size", torch::kCUDA, &moe_align_block_size);
 
-#ifndef USE_ROCM
+#if !defined(USE_ROCM) && !defined(VLLM_BUILD_LEGACY_CUDA)
   m.def(
       "moe_wna16_gemm(Tensor input, Tensor! output, Tensor b_qweight, "
       "Tensor b_scales, Tensor? b_qzeros, "
@@ -54,7 +54,9 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, m) {
       "topk, "
       "int moe_block_size, bool replicate_input, bool apply_weights)"
       " -> Tensor");
+#endif // !USE_ROCM && !VLLM_BUILD_LEGACY_CUDA
 
+#ifndef USE_ROCM
   m.def(
       "moe_permute(Tensor input, Tensor topk_ids,"
       "Tensor token_expert_indices, Tensor? expert_map, int n_expert,"
