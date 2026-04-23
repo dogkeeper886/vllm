@@ -17,7 +17,7 @@ RUNTIME_IMAGE  ?= vllm37
 RUNTIME_LOCAL  ?= vllm37-local
 REPO_ROOT      := $(shell git rev-parse --show-toplevel 2>/dev/null || echo ../..)
 
-.PHONY: help build-builder build-runtime build-local build build-all-local run stop logs clean
+.PHONY: help build-builder build-runtime build-local build-local-no-cache build build-all-local run stop logs clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -42,6 +42,14 @@ build-runtime: ## Build runtime image from GitHub clone
 
 build-local: ## Build runtime image from local source
 	docker build \
+		-t $(RUNTIME_LOCAL) \
+		-f runtime/Dockerfile.local \
+		--build-arg BUILDER_IMAGE=$(BUILDER_IMAGE) \
+		--build-arg MAX_JOBS=$(JOBS) \
+		$(REPO_ROOT)
+
+build-local-no-cache: ## Build runtime image from local source (no layer cache)
+	docker build --no-cache \
 		-t $(RUNTIME_LOCAL) \
 		-f runtime/Dockerfile.local \
 		--build-arg BUILDER_IMAGE=$(BUILDER_IMAGE) \

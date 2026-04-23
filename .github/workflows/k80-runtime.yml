@@ -28,6 +28,10 @@ on:
         description: "Runtime smoke test result"
         value: ${{ jobs.runtime.outputs.result }}
 
+concurrency:
+  group: k80-hardware
+  cancel-in-progress: false
+
 jobs:
   runtime:
     name: Container smoke test
@@ -53,14 +57,23 @@ jobs:
         working-directory: docker/k80
         run: |
           echo "Starting vLLM: TP_SIZE=$TP_SIZE MODEL=$MODEL"
-          TP_SIZE=$TP_SIZE MODEL=$MODEL docker compose up -d
+          TP_SIZE=$TP_SIZE MODEL=$MODEL \
+            docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d
           docker compose ps
 
       - name: Wait for server ready
         id: wait
+        working-directory: docker/k80
         run: |
           echo "Waiting up to 10 min for http://localhost:8000/v1/models ..."
           for i in $(seq 1 120); do
+            CID=$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -q vllm)
+            STATE=$(docker inspect --format='{{.State.Status}}' "$CID" 2>/dev/null || echo "missing")
+            if [ "$STATE" != "running" ]; then
+              echo "::error::Container state=$STATE before server became ready."
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color --tail 200
+              exit 1
+            fi
             if curl -fsS --max-time 3 http://localhost:8000/v1/models >/dev/null 2>&1; then
               echo "Server ready after ${i}x 5s polls."
               exit 0
@@ -88,13 +101,14 @@ jobs:
         working-directory: docker/k80
         run: |
           mkdir -p /tmp/k80-ci-logs
-          docker compose logs --no-color > /tmp/k80-ci-logs/vllm.log 2>&1 || true
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml logs \
+            --no-color > /tmp/k80-ci-logs/vllm.log 2>&1 || true
           tail -200 /tmp/k80-ci-logs/vllm.log || true
 
       - name: Tear down container
         if: always()
         working-directory: docker/k80
-        run: docker compose down -v || true
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v || true
 
       - name: Upload logs
         if: always()
