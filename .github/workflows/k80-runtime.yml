@@ -1,0 +1,104 @@
+name: K80 Runtime Smoke Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      tp_size:
+        description: "Tensor parallel size (1=single GPU die; higher = multi-die, power-risky)"
+        required: false
+        default: "1"
+        type: string
+      model:
+        description: "Model to serve"
+        required: false
+        default: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+        type: string
+  workflow_call:
+    inputs:
+      tp_size:
+        required: false
+        default: "1"
+        type: string
+      model:
+        required: false
+        default: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+        type: string
+    outputs:
+      result:
+        description: "Runtime smoke test result"
+        value: ${{ jobs.runtime.outputs.result }}
+
+jobs:
+  runtime:
+    name: Container smoke test
+    runs-on: [self-hosted, vllm]
+    env:
+      TP_SIZE: ${{ inputs.tp_size || '1' }}
+      MODEL: ${{ inputs.model || 'TinyLlama/TinyLlama-1.1B-Chat-v1.0' }}
+    outputs:
+      result: ${{ steps.smoke.outcome }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify runtime image is present
+        run: |
+          if ! docker image inspect vllm37-local:latest >/dev/null 2>&1; then
+            echo "::error::vllm37-local:latest not found. Run k80-build.yml first."
+            exit 1
+          fi
+
+      - name: Start vLLM container
+        working-directory: docker/k80
+        run: |
+          echo "Starting vLLM: TP_SIZE=$TP_SIZE MODEL=$MODEL"
+          TP_SIZE=$TP_SIZE MODEL=$MODEL docker compose up -d
+          docker compose ps
+
+      - name: Wait for server ready
+        id: wait
+        run: |
+          echo "Waiting up to 10 min for http://localhost:8000/v1/models ..."
+          for i in $(seq 1 120); do
+            if curl -fsS --max-time 3 http://localhost:8000/v1/models >/dev/null 2>&1; then
+              echo "Server ready after ${i}x 5s polls."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Server did not become ready in 10 minutes."
+          exit 1
+
+      - name: Smoke test — /v1/completions
+        id: smoke
+        run: |
+          RESP=$(curl -fsS --max-time 60 http://localhost:8000/v1/completions \
+            -H "Content-Type: application/json" \
+            -d "{\"model\":\"$MODEL\",\"prompt\":\"Hello\",\"max_tokens\":16,\"temperature\":0}")
+          echo "--- response ---"
+          echo "$RESP"
+          echo "$RESP" | jq -e '.choices[0].text' >/dev/null || {
+            echo "::error::Response missing choices[0].text"
+            exit 1
+          }
+
+      - name: Capture container logs
+        if: always()
+        working-directory: docker/k80
+        run: |
+          mkdir -p /tmp/k80-ci-logs
+          docker compose logs --no-color > /tmp/k80-ci-logs/vllm.log 2>&1 || true
+          tail -200 /tmp/k80-ci-logs/vllm.log || true
+
+      - name: Tear down container
+        if: always()
+        working-directory: docker/k80
+        run: docker compose down -v || true
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k80-runtime-logs
+          path: /tmp/k80-ci-logs/

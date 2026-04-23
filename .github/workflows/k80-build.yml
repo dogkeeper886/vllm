@@ -1,0 +1,80 @@
+name: K80 Docker Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      no_cache:
+        description: "Force rebuild without Docker layer cache"
+        required: false
+        default: false
+        type: boolean
+      rebuild_builder:
+        description: "Rebuild the builder image from scratch (~120 min)"
+        required: false
+        default: false
+        type: boolean
+  workflow_call:
+    inputs:
+      no_cache:
+        required: false
+        default: false
+        type: boolean
+      rebuild_builder:
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      result:
+        description: "Build result"
+        value: ${{ jobs.build.outputs.result }}
+
+jobs:
+  build:
+    name: Build vllm37-local image
+    runs-on: [self-hosted, vllm]
+    env:
+      BUILDER_IMAGE: vllm37-builder
+      BUILDER_SOURCE: dogkeeper886/vllm37-builder:latest
+      RUNTIME_LOCAL: vllm37-local
+    outputs:
+      result: ${{ steps.build-local.outcome }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure builder image exists
+        run: |
+          if [ "${{ inputs.rebuild_builder }}" = "true" ]; then
+            echo "rebuild_builder=true — building $BUILDER_IMAGE from source"
+            cd docker/k80
+            make build-builder
+          elif ! docker image inspect "$BUILDER_IMAGE:latest" >/dev/null 2>&1; then
+            echo "Builder image not found locally. Pulling $BUILDER_SOURCE..."
+            docker pull "$BUILDER_SOURCE"
+            docker tag "$BUILDER_SOURCE" "$BUILDER_IMAGE:latest"
+          else
+            echo "Builder image $BUILDER_IMAGE:latest already present — skipping."
+          fi
+
+      - name: Build runtime image (local source)
+        id: build-local
+        run: |
+          cd docker/k80
+          if [ "${{ inputs.no_cache }}" = "true" ]; then
+            docker build --no-cache \
+              -t $RUNTIME_LOCAL \
+              -f runtime/Dockerfile.local \
+              --build-arg BUILDER_IMAGE=$BUILDER_IMAGE \
+              --build-arg MAX_JOBS=8 \
+              ../..
+          else
+            make build-local
+          fi
+
+      - name: Report image size
+        if: always()
+        run: |
+          docker image inspect "$RUNTIME_LOCAL:latest" \
+            --format 'Image: {{.RepoTags}}  Size: {{.Size}} bytes' || \
+            echo "Runtime image not available."

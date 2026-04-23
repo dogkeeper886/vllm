@@ -1,0 +1,35 @@
+name: K80 Full Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      no_cache:
+        description: "Force rebuild without Docker layer cache"
+        required: false
+        default: false
+        type: boolean
+      tp_size:
+        description: "Tensor parallel size for smoke test"
+        required: false
+        default: "1"
+        type: string
+      model:
+        description: "Model for smoke test"
+        required: false
+        default: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+        type: string
+
+jobs:
+  build:
+    name: Build
+    uses: ./.github/workflows/k80-build.yml
+    with:
+      no_cache: ${{ inputs.no_cache }}
+
+  runtime:
+    name: Runtime smoke
+    needs: build
+    uses: ./.github/workflows/k80-runtime.yml
+    with:
+      tp_size: ${{ inputs.tp_size }}
+      model: ${{ inputs.model }}
