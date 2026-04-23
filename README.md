@@ -22,8 +22,10 @@ the v0 engine with PyTorch SDPA attention and no CUDA graphs.
 
 ## Hardware target
 
-- Tesla K80 (compute capability 3.7) — tested on 2× K80 cards (4 dies)
-- Other sm_37 cards (Tesla M60, GRID K520) — untested but should work
+- Tesla K80 (sm_3.7, GK210B) — the only hardware this fork is tested on
+  (2× K80 = 4 GPU dies, 12 GiB each)
+- sm_3.5 Kepler Teslas (K20, K20X, K40) — would need
+  `TORCH_CUDA_ARCH_LIST="3.5"` in the builder Dockerfile and are untested
 
 ## Quick start
 
@@ -33,7 +35,7 @@ Prebuilt builder image on Docker Hub:
 docker pull dogkeeper886/vllm37-builder:latest
 ```
 
-Build and run from source:
+Build and run from this checkout:
 
 ```bash
 cd docker/k80
@@ -41,13 +43,23 @@ cd docker/k80
 # Tag the prebuilt builder so the Makefile finds it (saves ~120 min)
 docker tag dogkeeper886/vllm37-builder:latest vllm37-builder:latest
 
-# Build the runtime image from the current checkout (~10 min)
+# Build the runtime image from the current checkout (~10 min, ~7 GB)
 make build-local
+```
 
-# Start the vLLM server (defaults: TinyLlama 1.1B, TP=4)
+> **Warning:** the default `docker/k80/.env` sets `TP_SIZE=4`. TP=4 on 2× K80
+> sharing a single CPU EPS rail can exceed the rail's spec and previously
+> halted the system. Start with `TP_SIZE=1` (or `TP_SIZE=2` if you've
+> verified your PSU) before running `make run`.
+
+```bash
+# Recommended: set a safe TP size first
+echo "TP_SIZE=1" >> .env
+
+# Start the vLLM server (defaults to TinyLlama 1.1B)
 make run && make logs
 
-# Test
+# Test — uses the MODEL from .env
 curl http://localhost:8000/v1/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0", "prompt": "Hello", "max_tokens": 50}'
