@@ -10,11 +10,14 @@
 #   make run              # Run with docker compose
 #   make clean            # Remove images
 
-include .env
+-include .env
 
 BUILDER_IMAGE  ?= vllm37-builder
 RUNTIME_IMAGE  ?= vllm37
 RUNTIME_LOCAL  ?= vllm37-local
+JOBS           ?= 4
+VLLM_REPO      ?= https://github.com/dogkeeper886/vllm.git
+VLLM_BRANCH    ?= main
 REPO_ROOT      := $(shell git rev-parse --show-toplevel 2>/dev/null || echo ../..)
 
 .PHONY: help build-builder build-runtime build-local build-local-no-cache build build-all-local run stop logs clean
