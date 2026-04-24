@@ -28,7 +28,7 @@ services:
       - "${DTYPE:-float32}"
       - "--enforce-eager"
       - "--tensor-parallel-size"
-      - "${TP_SIZE:-4}"
+      - "${TP_SIZE:-1}"
       - "--max-model-len"
       - "${MAX_MODEL_LEN:-2048}"
       - "--gpu-memory-utilization"

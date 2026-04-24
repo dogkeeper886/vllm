@@ -44,8 +44,17 @@ Edit `.env` to adjust build and runtime settings:
 | `VLLM_REPO` | dogkeeper886/vllm | GitHub repo for runtime build |
 | `VLLM_BRANCH` | main | Git branch to clone |
 | `MODEL` | TinyLlama-1.1B | Model to serve |
-| `TP_SIZE` | 4 | Tensor parallel size |
+| `TP_SIZE` | 1 | Tensor parallel size (see safety note below before raising) |
 | `DTYPE` | float32 | Only float32 on K80 |
+
+### TP safety
+
+`TP_SIZE` defaults to `1` because TP>1 on 2x K80 has triggered full system hangs
+on this hardware — even inside a KVM guest with vLLM inside a container. Before
+raising it, enhance host-side logging (`dmesg`, `journalctl`, `nvidia-smi dmon`)
+so a hang is diagnosable post-mortem. TP=4 is additionally power-risky on a
+shared CPU EPS connector and is currently unvalidated. See the project
+`CLAUDE.md` for the authoritative safety rules.
 
 ## Architecture
 
