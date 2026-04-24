@@ -25,6 +25,7 @@ If you only need to use the distributed environment without model/pipeline
 import contextlib
 import gc
 import pickle
+import time
 import weakref
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
@@ -42,7 +43,7 @@ import vllm.envs as envs
 from vllm.distributed.device_communicators.base_device_communicator import (
     DeviceCommunicatorBase)
 from vllm.distributed.utils import StatelessProcessGroup
-from vllm.logger import init_logger
+from vllm.logger import flush_logs, init_logger, k80_trace
 from vllm.utils import (direct_register_custom_op, get_distributed_init_method,
                         resolve_obj_by_qualname, supports_custom_op)
 
@@ -223,11 +224,28 @@ class GroupCoordinator:
         self_cpu_group = None
 
         for ranks in group_ranks:
+            k80_trace(logger,
+                      "new_group begin name=%s backend=%s ranks=%s",
+                      group_name, torch_distributed_backend, ranks)
+            flush_logs()
+            _t0 = time.monotonic()
             device_group = torch.distributed.new_group(
                 ranks, backend=torch_distributed_backend)
+            k80_trace(logger,
+                      "new_group done name=%s backend=%s elapsed_ms=%.1f",
+                      group_name, torch_distributed_backend,
+                      (time.monotonic() - _t0) * 1000.0)
             # a group with `gloo` backend, to allow direct coordination between
             # processes through the CPU.
+            k80_trace(logger,
+                      "new_group begin name=%s backend=gloo ranks=%s",
+                      group_name, ranks)
+            flush_logs()
+            _t0 = time.monotonic()
             cpu_group = torch.distributed.new_group(ranks, backend="gloo")
+            k80_trace(logger,
+                      "new_group done name=%s backend=gloo elapsed_ms=%.1f",
+                      group_name, (time.monotonic() - _t0) * 1000.0)
             if self.rank in ranks:
                 self.ranks = ranks
                 self.world_size = len(ranks)
@@ -1010,11 +1028,21 @@ def init_distributed_environment(
                 "Fallback Gloo backend is not available.")
             backend = "gloo"
         # this backend is used for WORLD
+        k80_trace(logger,
+                  "init_process_group begin backend=%s method=%s "
+                  "world_size=%d rank=%d",
+                  backend, distributed_init_method, world_size, rank)
+        flush_logs()
+        _t0 = time.monotonic()
         torch.distributed.init_process_group(
             backend=backend,
             init_method=distributed_init_method,
             world_size=world_size,
             rank=rank)
+        k80_trace(logger,
+                  "init_process_group done backend=%s rank=%d elapsed_ms=%.1f",
+                  backend, rank, (time.monotonic() - _t0) * 1000.0)
+        flush_logs()
     # set the local rank
     # local_rank is not available in torch ProcessGroup,
     # see https://github.com/pytorch/pytorch/issues/122816

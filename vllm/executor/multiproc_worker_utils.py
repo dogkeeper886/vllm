@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar, Union
 import torch
 
 from vllm.config import VllmConfig
-from vllm.logger import init_logger
+from vllm.logger import init_logger, k80_trace
 from vllm.utils import (_maybe_force_spawn, decorate_logs, get_mp_context,
                         run_method)
 
@@ -209,6 +209,9 @@ def _run_worker_process(
     # Add process-specific prefix to stdout and stderr
     process_name = get_mp_context().current_process().name
     decorate_logs(process_name)
+
+    k80_trace(logger, "worker process entered rank=%d pid=%d ppid=%d",
+              rank, os.getpid(), os.getppid())
 
     # Initialize worker
     worker = worker_factory(vllm_config, rank)

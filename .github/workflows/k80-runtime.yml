@@ -13,6 +13,11 @@ on:
         required: false
         default: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
         type: string
+      k80_trace:
+        description: "Enable VLLM_K80_TRACE=1 for TP-init hang diagnosis logs"
+        required: false
+        default: "1"
+        type: string
   workflow_call:
     inputs:
       tp_size:
@@ -22,6 +27,10 @@ on:
       model:
         required: false
         default: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+        type: string
+      k80_trace:
+        required: false
+        default: "1"
         type: string
     outputs:
       result:
@@ -39,6 +48,8 @@ jobs:
     env:
       TP_SIZE: ${{ inputs.tp_size || '1' }}
       MODEL: ${{ inputs.model || 'TinyLlama/TinyLlama-1.1B-Chat-v1.0' }}
+      VLLM_K80_TRACE: ${{ inputs.k80_trace || '1' }}
+      VLLM_LOG_DIR: /tmp/k80-ci-logs
     outputs:
       result: ${{ steps.smoke.outcome }}
 
@@ -46,18 +57,48 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Verify runtime image is present
+      - name: Ensure runtime image matches branch SHA
+        working-directory: docker/k80
+        env:
+          BRANCH_SHA: ${{ github.sha }}
         run: |
-          if ! docker image inspect vllm37-local:latest >/dev/null 2>&1; then
-            echo "::error::vllm37-local:latest not found. Run k80-build.yml first."
+          # k80-runtime.yml used to only verify the image existed, which meant
+          # a stale image silently masked source-level changes (see #10). Now
+          # the build step stamps org.opencontainers.image.revision with the
+          # source SHA; if it differs from the checked-out branch SHA, we
+          # rebuild from local source before running the smoke.
+          IMAGE_SHA=$(docker inspect --format='{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+            vllm37-local:latest 2>/dev/null || echo "")
+          if [ "$IMAGE_SHA" = "$BRANCH_SHA" ]; then
+            echo "vllm37-local:latest already at branch SHA ($BRANCH_SHA); reusing image."
+            exit 0
+          fi
+          if [ -z "$IMAGE_SHA" ]; then
+            echo "Runtime image missing or has no revision label; building from current source."
+          else
+            echo "Runtime image is at $IMAGE_SHA but branch is $BRANCH_SHA; rebuilding."
+          fi
+          if ! docker image inspect vllm37-builder:latest >/dev/null 2>&1; then
+            echo "::error::vllm37-builder:latest not found. Run k80-build.yml with rebuild_builder=true, or docker pull dogkeeper886/vllm37-builder."
             exit 1
           fi
+          make build-local
+
+      - name: Prepare log directory
+        run: |
+          # NCCL_DEBUG_FILE in the container writes into /var/log/vllm, which is
+          # bind-mounted from $VLLM_LOG_DIR on the host. Directory must exist
+          # and be writable before `compose up` or the mount silently becomes
+          # root-owned empty dir and NCCL cannot write.
+          mkdir -p "$VLLM_LOG_DIR"
+          chmod 777 "$VLLM_LOG_DIR"
 
       - name: Start vLLM container
         working-directory: docker/k80
         run: |
-          echo "Starting vLLM: TP_SIZE=$TP_SIZE MODEL=$MODEL"
+          echo "Starting vLLM: TP_SIZE=$TP_SIZE MODEL=$MODEL VLLM_K80_TRACE=$VLLM_K80_TRACE"
           TP_SIZE=$TP_SIZE MODEL=$MODEL \
+          VLLM_K80_TRACE=$VLLM_K80_TRACE VLLM_LOG_DIR=$VLLM_LOG_DIR \
             docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d
           docker compose ps
 

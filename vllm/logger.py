@@ -21,9 +21,34 @@ VLLM_LOGGING_CONFIG_PATH = envs.VLLM_LOGGING_CONFIG_PATH
 VLLM_LOGGING_LEVEL = envs.VLLM_LOGGING_LEVEL
 VLLM_LOGGING_PREFIX = envs.VLLM_LOGGING_PREFIX
 
-_FORMAT = (f"{VLLM_LOGGING_PREFIX}%(levelname)s %(asctime)s "
-           "[%(filename)s:%(lineno)d] %(message)s")
+# K80 fork: opt-in hang-diagnosis tracing. Adds rank tags to every log record
+# and unlocks explicit flush_logs() calls at TP-init points. Off by default so
+# TP=1 upstream output is unchanged.
+VLLM_K80_TRACE = os.environ.get("VLLM_K80_TRACE", "0") == "1"
+
+if VLLM_K80_TRACE:
+    _FORMAT = (f"{VLLM_LOGGING_PREFIX}%(levelname)s %(asctime)s "
+               "rank=%(rank)s local_rank=%(local_rank)s "
+               "[%(filename)s:%(lineno)d] %(message)s")
+else:
+    _FORMAT = (f"{VLLM_LOGGING_PREFIX}%(levelname)s %(asctime)s "
+               "[%(filename)s:%(lineno)d] %(message)s")
 _DATE_FORMAT = "%m-%d %H:%M:%S"
+
+
+class _RankFilter(logging.Filter):
+    """Attach rank / local_rank from the environment to every LogRecord.
+
+    torch.distributed sets RANK and LOCAL_RANK in each worker; before those are
+    set (driver startup, pre-spawn) the values show as '-'. Filter runs for
+    every record whether VLLM_K80_TRACE is on or off; the format string only
+    renders the fields when VLLM_K80_TRACE=1.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.rank = os.environ.get("RANK", "-")
+        record.local_rank = os.environ.get("LOCAL_RANK", "-")
+        return True
 
 DEFAULT_LOGGING_CONFIG = {
     "formatters": {
@@ -33,10 +58,19 @@ DEFAULT_LOGGING_CONFIG = {
             "format": _FORMAT,
         },
     },
+    "filters": {
+        # Pass the class object directly rather than a "vllm.logger._RankFilter"
+        # string. A string path causes dictConfig to importlib.import_module()
+        # vllm.logger while vllm.logger is still being imported — circular.
+        "vllm_rank": {
+            "()": _RankFilter,
+        },
+    },
     "handlers": {
         "vllm": {
             "class": "logging.StreamHandler",
             "formatter": "vllm",
+            "filters": ["vllm_rank"],
             "level": VLLM_LOGGING_LEVEL,
             "stream": "ext://sys.stdout",
         },
@@ -51,6 +85,29 @@ DEFAULT_LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False
 }
+
+
+def flush_logs() -> None:
+    """Flush the vllm logger's handlers.
+
+    Call right before known hang-prone operations (NCCL init, first
+    collective). StreamHandler.emit already flushes Python-level buffers per
+    record, but the underlying libc stdio stream is block-buffered in Docker;
+    crash-safe flushing additionally requires PYTHONUNBUFFERED=1 and/or
+    `stdbuf -oL` on the container process.
+    """
+    for handler in logging.getLogger("vllm").handlers:
+        try:
+            handler.flush()
+        except Exception:
+            pass
+
+
+def k80_trace(log: Logger, msg: str, *args: Any) -> None:
+    """Gated trace logger for TP-init hang diagnosis. No-op unless
+    VLLM_K80_TRACE=1 in the environment at process start."""
+    if VLLM_K80_TRACE:
+        log.info("[k80-trace] " + msg, *args, stacklevel=2)
 
 
 @lru_cache

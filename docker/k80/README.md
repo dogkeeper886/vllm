@@ -63,6 +63,72 @@ so a hang is diagnosable post-mortem. TP=4 is additionally power-risky on a
 shared CPU EPS connector and is currently unvalidated. See the project
 `CLAUDE.md` for the authoritative safety rules.
 
+## Diagnosing a hang
+
+Phase-1 instrumentation (issue #10) adds opt-in trace logging at the TP-init
+stages most likely to hang, plus crash-safe stdio so final log lines actually
+reach disk when the kernel wedges.
+
+### Enabling trace logs
+
+Set `VLLM_K80_TRACE=1` before `make run` (or via the `k80-runtime` workflow
+input; default is on in CI):
+
+```bash
+VLLM_K80_TRACE=1 make run
+```
+
+Each vLLM log record is tagged `rank=N local_rank=N` while tracing is on. Trace
+lines are prefixed `[k80-trace]` — grep the log bundle for those to reconstruct
+the startup timeline.
+
+### What gets logged, and where the evidence lands
+
+| Log | Content | Where |
+|---|---|---|
+| `vllm.log` | Everything vLLM wrote to stdout (app logger, trace lines, Python exceptions) | `docker compose logs` → CI artifact |
+| `nccl-*.log` | NCCL library's own debug output (one file per process via `%h-%p`) | Bind-mounted `/var/log/vllm/` → `$VLLM_LOG_DIR` → CI artifact |
+| host `dmesg`, `journalctl` | Kernel / driver wedges (Xid errors, PCIe errors) | Host-side capture — **not yet wired into CI**, follow-up work |
+
+The vLLM and NCCL logs are separate on purpose: if the app process hangs or
+dies, the NCCL file is still intact because NCCL writes it directly via its C
+runtime and never touches Python's stdio layer.
+
+### What to look for
+
+1. **Find the last trace line before the hang.** Each line tells you which
+   rank reached which stage. Stages (in order): `spawning workers` →
+   `worker process entered` → `init_device cuda ready` →
+   `init_worker_distributed_environment begin` → `init_process_group begin` →
+   `new_group begin` (per TP/PP group) → `load_model` →
+   `determine_num_available_blocks` → `initialize_cache` → `warmup` →
+   `post-warmup sync`.
+
+2. **Compare `elapsed_ms` / `elapsed_s` fields** against expected. The
+   numbers below are **initial estimates** derived from the flow study, not
+   measured baselines — replace them with observed CI medians once a TP=1
+   run establishes ground truth:
+   - `init_process_group` should complete in < 2 s. > 5 s = NCCL probe stall.
+   - `new_group` with NCCL backend: < 500 ms. Larger = PCIe / P2P issue.
+   - `load_model`: depends on model size and disk; typically < 30 s for 3 B FP32.
+   - `warmup`: < 10 s.
+
+3. **Watch `free_mib` on each rank.** Drop below a few hundred MB before the
+   warmup forward is a red flag — K80 has ~11.5 GB per die, a 3 B FP32 TP=2
+   model leaves ~2-3 GB margin at peak.
+
+4. **Cross-reference NCCL log timestamps** with vLLM trace timestamps. NCCL
+   buffers some messages; the last NCCL line often tells you which collective
+   was in flight when the app wedged.
+
+### Phase-1 validation policy
+
+TP=1 is the current CI default and the only configuration validated to work on
+this hardware. **Do not attempt TP >= 2** until (a) Phase-1 has demonstrated
+that trace lines and NCCL logs actually land in the artifact on TP=1, and (b)
+host-side `dmesg` / `nvidia-smi dmon` capture is wired into the workflow. See
+issue #10 for status.
+
 ## Architecture
 
 ```
