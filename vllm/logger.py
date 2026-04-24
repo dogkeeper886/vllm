@@ -59,8 +59,11 @@ DEFAULT_LOGGING_CONFIG = {
         },
     },
     "filters": {
+        # Pass the class object directly rather than a "vllm.logger._RankFilter"
+        # string. A string path causes dictConfig to importlib.import_module()
+        # vllm.logger while vllm.logger is still being imported — circular.
         "vllm_rank": {
-            "()": "vllm.logger._RankFilter",
+            "()": _RankFilter,
         },
     },
     "handlers": {
