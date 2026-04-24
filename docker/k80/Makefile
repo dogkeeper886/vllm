@@ -18,9 +18,13 @@ RUNTIME_LOCAL  ?= vllm37-local
 JOBS           ?= 4
 VLLM_REPO      ?= https://github.com/dogkeeper886/vllm.git
 VLLM_BRANCH    ?= main
+# Host dir bind-mounted into the container at /var/log/vllm for vllm + NCCL
+# logs. Must exist and be writable before `docker compose up` — otherwise
+# Docker auto-creates it as root-owned and NCCL_DEBUG_FILE silently fails.
+VLLM_LOG_DIR   ?= /tmp/vllm-logs
 REPO_ROOT      := $(shell git rev-parse --show-toplevel 2>/dev/null || echo ../..)
 
-.PHONY: help build-builder build-runtime build-local build-local-no-cache build build-all-local run stop logs clean
+.PHONY: help build-builder build-runtime build-local build-local-no-cache build build-all-local log-dir run stop logs clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -63,8 +67,12 @@ build: build-builder build-runtime ## Build builder + runtime (GitHub clone)
 
 build-all-local: build-builder build-local ## Build builder + runtime (local source)
 
-run: ## Start vLLM server via docker compose
-	docker compose up -d
+log-dir: ## Ensure VLLM_LOG_DIR exists (bind-mount target for vllm + NCCL logs)
+	@mkdir -p $(VLLM_LOG_DIR)
+	@chmod 777 $(VLLM_LOG_DIR)
+
+run: log-dir ## Start vLLM server via docker compose
+	VLLM_LOG_DIR=$(VLLM_LOG_DIR) docker compose up -d
 
 stop: ## Stop vLLM server
 	docker compose down

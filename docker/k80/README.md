@@ -104,7 +104,10 @@ runtime and never touches Python's stdio layer.
    `determine_num_available_blocks` → `initialize_cache` → `warmup` →
    `post-warmup sync`.
 
-2. **Compare `elapsed_ms` / `elapsed_s` fields** against expected:
+2. **Compare `elapsed_ms` / `elapsed_s` fields** against expected. The
+   numbers below are **initial estimates** derived from the flow study, not
+   measured baselines — replace them with observed CI medians once a TP=1
+   run establishes ground truth:
    - `init_process_group` should complete in < 2 s. > 5 s = NCCL probe stall.
    - `new_group` with NCCL backend: < 500 ms. Larger = PCIe / P2P issue.
    - `load_model`: depends on model size and disk; typically < 30 s for 3 B FP32.
