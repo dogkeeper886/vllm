@@ -36,7 +36,14 @@ curl http://localhost:8000/v1/completions \
 
 ## Configuration
 
-Edit `.env` to adjust build and runtime settings:
+Optional — the Makefile and compose file both have sensible built-in defaults.
+To override, copy the template and edit:
+
+```bash
+cp .env.example .env
+```
+
+`.env` values apply to both `make build-*` and `make run`. Available settings:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -67,7 +74,7 @@ docker/k80/
 │   └── Dockerfile.local    # Copy local source, build vLLM
 ├── Makefile                # Build orchestration
 ├── docker-compose.yml      # Runtime with GPU access
-├── .env                    # Configuration
+├── .env.example            # Configuration template (copy to .env)
 └── README.md               # This file
 ```
 
