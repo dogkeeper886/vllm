@@ -11,7 +11,7 @@ from vllm.executor.executor_base import DistributedExecutorBase
 from vllm.executor.multiproc_worker_utils import (
     ProcessWorkerWrapper, ResultHandler, WorkerMonitor,
     set_multiprocessing_worker_envs)
-from vllm.logger import init_logger
+from vllm.logger import flush_logs, init_logger, k80_trace
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.sequence import ExecuteModelRequest
 from vllm.utils import (_run_task_with_lock, cuda_device_count_stateless,
@@ -86,12 +86,18 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
         if world_size == 1:
             self.worker_monitor = None
         else:
+            k80_trace(logger,
+                      "spawning workers: world_size=%d tp_size=%d driver_pid=%d",
+                      world_size, tensor_parallel_size, os.getpid())
+            flush_logs()
             result_handler = ResultHandler()
             for rank in range(1, world_size):
                 worker = ProcessWorkerWrapper(result_handler,
                                               WorkerWrapperBase,
                                               self.vllm_config, rank)
                 self.workers.append(worker)
+                k80_trace(logger, "spawned worker rank=%d child_pid=%d",
+                          rank, worker.process.pid)
                 if rank % tensor_parallel_size == 0:
                     self.tp_driver_workers.append(worker)
                 else:
@@ -100,6 +106,7 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
             self.worker_monitor = WorkerMonitor(self.workers, result_handler)
             result_handler.start()
             self.worker_monitor.start()
+            flush_logs()
 
         # Set up signal handlers to shutdown the executor cleanly
         # sometimes gc does not work well
@@ -121,11 +128,24 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
                 or (rank % self.parallel_config.tensor_parallel_size == 0),
             )
             all_kwargs.append(kwargs)
+        k80_trace(logger, "stage=init_worker all_ranks begin")
+        flush_logs()
         self._run_workers("init_worker", all_kwargs)
+        k80_trace(logger, "stage=init_worker all_ranks done")
+
+        k80_trace(logger, "stage=init_device all_ranks begin "
+                  "(includes torch.distributed.init_process_group)")
+        flush_logs()
         self._run_workers("init_device")
+        k80_trace(logger, "stage=init_device all_ranks done")
+
+        k80_trace(logger, "stage=load_model all_ranks begin")
+        flush_logs()
         self._run_workers("load_model",
                           max_concurrent_workers=self.parallel_config.
                           max_parallel_loading_workers)
+        k80_trace(logger, "stage=load_model all_ranks done")
+        flush_logs()
         self.driver_exec_model = make_async(self.driver_worker.execute_model)
         self.pp_locks: Optional[List[asyncio.Lock]] = None
 

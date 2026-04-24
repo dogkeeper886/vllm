@@ -3,6 +3,7 @@
 """A GPU worker class."""
 import gc
 import os
+import time
 from typing import Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
@@ -16,7 +17,7 @@ from vllm.distributed import (ensure_model_parallel_initialized,
                               init_distributed_environment,
                               set_custom_all_reduce)
 from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
-from vllm.logger import init_logger
+from vllm.logger import flush_logs, init_logger, k80_trace
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.model_executor.layers.sampler import SamplerOutput
@@ -187,17 +188,40 @@ class Worker(LocalOrDistributedWorkerBase):
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
             self.baseline_snapshot = MemorySnapshot()
+            _free, _total = torch.cuda.mem_get_info()
+            k80_trace(
+                logger,
+                "init_device cuda ready rank=%d local_rank=%d device=%s "
+                "free_mib=%d total_mib=%d",
+                self.rank, self.local_rank,
+                torch.cuda.get_device_name(self.device),
+                _free // (1 << 20), _total // (1 << 20))
         else:
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
         # Initialize the distributed environment.
+        k80_trace(logger,
+                  "init_worker_distributed_environment begin rank=%d",
+                  self.rank)
+        flush_logs()
+        _t0 = time.monotonic()
         init_worker_distributed_environment(self.vllm_config, self.rank,
                                             self.distributed_init_method,
                                             self.local_rank)
+        k80_trace(logger,
+                  "init_worker_distributed_environment done rank=%d "
+                  "elapsed_ms=%.1f",
+                  self.rank, (time.monotonic() - _t0) * 1000.0)
+        flush_logs()
         # Set random seed.
         set_random_seed(self.model_config.seed)
 
     def load_model(self):
+        _free_pre, _ = torch.cuda.mem_get_info()
+        k80_trace(logger, "load_model begin rank=%d free_mib=%d",
+                  self.rank, _free_pre // (1 << 20))
+        flush_logs()
+        _t0 = time.monotonic()
         if self.vllm_config.model_config.enable_sleep_mode:
             allocator = CuMemAllocator.get_instance()
             assert allocator.get_current_usage() == 0, (
@@ -209,6 +233,13 @@ class Worker(LocalOrDistributedWorkerBase):
             context = nullcontext()
         with context:
             self.model_runner.load_model()
+        _free_post, _ = torch.cuda.mem_get_info()
+        k80_trace(
+            logger,
+            "load_model done rank=%d elapsed_s=%.2f free_mib=%d "
+            "weights_used_mib=%d",
+            self.rank, time.monotonic() - _t0, _free_post // (1 << 20),
+            (_free_pre - _free_post) // (1 << 20))
 
     def save_sharded_state(
         self,
@@ -248,6 +279,13 @@ class Worker(LocalOrDistributedWorkerBase):
         torch.cuda.reset_peak_memory_stats()
 
         free_memory_pre_profile, total_gpu_memory = torch.cuda.mem_get_info()
+        k80_trace(
+            logger,
+            "determine_num_available_blocks begin rank=%d free_mib=%d "
+            "total_mib=%d",
+            self.rank, free_memory_pre_profile // (1 << 20),
+            total_gpu_memory // (1 << 20))
+        flush_logs()
 
         # Execute a forward pass with dummy inputs to profile the memory usage
         # of the model.
@@ -293,6 +331,12 @@ class Worker(LocalOrDistributedWorkerBase):
                f"{(available_kv_cache_memory / GiB_bytes):.2f}GiB.")
 
         logger.info(msg)
+        _free_post, _ = torch.cuda.mem_get_info()
+        k80_trace(
+            logger,
+            "determine_num_available_blocks done rank=%d free_mib=%d "
+            "num_gpu_blocks=%d num_cpu_blocks=%d",
+            self.rank, _free_post // (1 << 20), num_gpu_blocks, num_cpu_blocks)
         # Final cleanup
         gc.collect()
 
@@ -325,6 +369,12 @@ class Worker(LocalOrDistributedWorkerBase):
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
+        _free_pre, _ = torch.cuda.mem_get_info()
+        k80_trace(logger,
+                  "initialize_cache begin rank=%d num_gpu_blocks=%d "
+                  "free_mib=%d",
+                  self.rank, num_gpu_blocks, _free_pre // (1 << 20))
+        flush_logs()
         if self.vllm_config.model_config.enable_sleep_mode:
             allocator = CuMemAllocator.get_instance()
             context = allocator.use_memory_pool(tag="kv_cache")
@@ -333,7 +383,37 @@ class Worker(LocalOrDistributedWorkerBase):
             context = nullcontext()
         with context:
             self._init_cache_engine()
+        _free_mid, _ = torch.cuda.mem_get_info()
+        k80_trace(
+            logger,
+            "kv_cache allocated rank=%d free_mib=%d kv_cache_mib=%d; "
+            "entering warmup",
+            self.rank, _free_mid // (1 << 20),
+            (_free_pre - _free_mid) // (1 << 20))
+        flush_logs()
+        _t_warm = time.monotonic()
         self._warm_up_model()
+        _free_post, _ = torch.cuda.mem_get_info()
+        k80_trace(
+            logger,
+            "warmup done rank=%d elapsed_s=%.2f free_mib=%d",
+            self.rank, time.monotonic() - _t_warm, _free_post // (1 << 20))
+
+        # Phase-1 fix: guarantee all TP ranks finish warmup (CUDA + Python)
+        # before the engine accepts its first request. Without this barrier,
+        # a rank that returns from _warm_up_model() while CUDA kernels are
+        # still running can skew against other ranks and the first request's
+        # in-model all_reduce deadlocks.
+        if self.parallel_config.tensor_parallel_size > 1:
+            k80_trace(logger,
+                      "post-warmup sync begin rank=%d (cuda.synchronize + "
+                      "torch.distributed.barrier)",
+                      self.rank)
+            flush_logs()
+            torch.cuda.synchronize()
+            torch.distributed.barrier()
+            k80_trace(logger, "post-warmup sync done rank=%d", self.rank)
+            flush_logs()
 
     def _init_cache_engine(self):
         assert self.cache_config.num_gpu_blocks is not None

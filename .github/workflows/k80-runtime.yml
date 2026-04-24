@@ -13,6 +13,11 @@ on:
         required: false
         default: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
         type: string
+      k80_trace:
+        description: "Enable VLLM_K80_TRACE=1 for TP-init hang diagnosis logs"
+        required: false
+        default: "1"
+        type: string
   workflow_call:
     inputs:
       tp_size:
@@ -22,6 +27,10 @@ on:
       model:
         required: false
         default: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+        type: string
+      k80_trace:
+        required: false
+        default: "1"
         type: string
     outputs:
       result:
@@ -39,6 +48,8 @@ jobs:
     env:
       TP_SIZE: ${{ inputs.tp_size || '1' }}
       MODEL: ${{ inputs.model || 'TinyLlama/TinyLlama-1.1B-Chat-v1.0' }}
+      VLLM_K80_TRACE: ${{ inputs.k80_trace || '1' }}
+      VLLM_LOG_DIR: /tmp/k80-ci-logs
     outputs:
       result: ${{ steps.smoke.outcome }}
 
@@ -53,11 +64,21 @@ jobs:
             exit 1
           fi
 
+      - name: Prepare log directory
+        run: |
+          # NCCL_DEBUG_FILE in the container writes into /var/log/vllm, which is
+          # bind-mounted from $VLLM_LOG_DIR on the host. Directory must exist
+          # and be writable before `compose up` or the mount silently becomes
+          # root-owned empty dir and NCCL cannot write.
+          mkdir -p "$VLLM_LOG_DIR"
+          chmod 777 "$VLLM_LOG_DIR"
+
       - name: Start vLLM container
         working-directory: docker/k80
         run: |
-          echo "Starting vLLM: TP_SIZE=$TP_SIZE MODEL=$MODEL"
+          echo "Starting vLLM: TP_SIZE=$TP_SIZE MODEL=$MODEL VLLM_K80_TRACE=$VLLM_K80_TRACE"
           TP_SIZE=$TP_SIZE MODEL=$MODEL \
+          VLLM_K80_TRACE=$VLLM_K80_TRACE VLLM_LOG_DIR=$VLLM_LOG_DIR \
             docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d
           docker compose ps
 
