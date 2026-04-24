@@ -47,12 +47,15 @@ build-runtime: ## Build runtime image from GitHub clone
 		--build-arg MAX_JOBS=$(JOBS) \
 		.
 
+GIT_SHA := $(shell git -C $(REPO_ROOT) rev-parse HEAD 2>/dev/null || echo unknown)
+
 build-local: ## Build runtime image from local source
 	docker build \
 		-t $(RUNTIME_LOCAL) \
 		-f runtime/Dockerfile.local \
 		--build-arg BUILDER_IMAGE=$(BUILDER_IMAGE) \
 		--build-arg MAX_JOBS=$(JOBS) \
+		--build-arg GIT_SHA=$(GIT_SHA) \
 		$(REPO_ROOT)
 
 build-local-no-cache: ## Build runtime image from local source (no layer cache)
@@ -61,6 +64,7 @@ build-local-no-cache: ## Build runtime image from local source (no layer cache)
 		-f runtime/Dockerfile.local \
 		--build-arg BUILDER_IMAGE=$(BUILDER_IMAGE) \
 		--build-arg MAX_JOBS=$(JOBS) \
+		--build-arg GIT_SHA=$(GIT_SHA) \
 		$(REPO_ROOT)
 
 build: build-builder build-runtime ## Build builder + runtime (GitHub clone)
