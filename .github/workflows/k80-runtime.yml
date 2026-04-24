@@ -91,10 +91,46 @@ jobs:
             -d "{\"model\":\"$MODEL\",\"prompt\":\"Hello\",\"max_tokens\":16,\"temperature\":0}")
           echo "--- response ---"
           echo "$RESP"
-          echo "$RESP" | jq -e '.choices[0].text' >/dev/null || {
+
+          TEXT=$(echo "$RESP" | jq -r '.choices[0].text')
+          FINISH=$(echo "$RESP" | jq -r '.choices[0].finish_reason')
+          COMPLETION_TOKENS=$(echo "$RESP" | jq -r '.usage.completion_tokens')
+
+          if [ -z "$TEXT" ] || [ "$TEXT" = "null" ]; then
             echo "::error::Response missing choices[0].text"
             exit 1
-          }
+          fi
+
+          GOLDEN=docker/k80/ci/golden.json
+          GOLDEN_MODEL=$(jq -r '.applies_when.model' "$GOLDEN")
+          GOLDEN_TP=$(jq -r '.applies_when.tp_size' "$GOLDEN")
+          if [ "$MODEL" = "$GOLDEN_MODEL" ] && [ "$TP_SIZE" = "$GOLDEN_TP" ]; then
+            EXPECT_TEXT=$(jq -r '.expected.text' "$GOLDEN")
+            EXPECT_TOKENS=$(jq -r '.expected.completion_tokens' "$GOLDEN")
+            EXPECT_FINISH=$(jq -r '.expected.finish_reason' "$GOLDEN")
+            FAIL=0
+            if [ "$TEXT" != "$EXPECT_TEXT" ]; then
+              echo "::error::Golden text mismatch"
+              echo "  expected: $(printf %q "$EXPECT_TEXT")"
+              echo "  actual:   $(printf %q "$TEXT")"
+              FAIL=1
+            fi
+            if [ "$COMPLETION_TOKENS" != "$EXPECT_TOKENS" ]; then
+              echo "::error::completion_tokens mismatch (expected=$EXPECT_TOKENS actual=$COMPLETION_TOKENS)"
+              FAIL=1
+            fi
+            if [ "$FINISH" != "$EXPECT_FINISH" ]; then
+              echo "::error::finish_reason mismatch (expected=$EXPECT_FINISH actual=$FINISH)"
+              FAIL=1
+            fi
+            if [ "$FAIL" = "1" ]; then
+              echo "::notice::To regenerate the golden, see $GOLDEN _comment field."
+              exit 1
+            fi
+            echo "Golden baseline match: text, completion_tokens, finish_reason all as expected."
+          else
+            echo "MODEL=$MODEL TP_SIZE=$TP_SIZE does not match golden (model=$GOLDEN_MODEL tp=$GOLDEN_TP) — skipping baseline check."
+          fi
 
       - name: Capture container logs
         if: always()
