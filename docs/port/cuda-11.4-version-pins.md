@@ -178,11 +178,11 @@ So:
 
 - **R470 is the last NVIDIA driver branch that supports K80** (per the R470 release notes' own assertion).
 - **R470 supports CUDA Toolkit 11.4 at runtime** (per the same release notes).
-- Branches after R470 (R515 onwards in the production lineage) drop Kepler.
+- Branches after R470 drop Kepler.
 
 A K80 host running R470 **cannot load** binaries linked against the CUDA 11.7 runtime — the driver is too old. The binary fails at process start with a "driver version is insufficient for CUDA runtime version" error class.
 
-This means our CUDA 11.4 pin is enforced by the **host driver**, not by the toolkit. The K80 self-hosted CI runner is on R470 because that's the last driver branch that supports K80. **Bumping the toolkit to 11.7 is not feasible without changing the driver, and there is no Kepler-supporting driver newer than R470.**
+This means our CUDA 11.4 pin is enforced by the **host driver**, not by the toolkit. The K80 self-hosted CI runner must be on R470 or earlier — that's the last Kepler-supporting branch (the precise runner driver version is to be confirmed once the [`k80-host-info.yml`](../../.github/workflows/k80-host-info.yml) workflow added by this PR is dispatchable post-merge). **Bumping the toolkit to 11.7 is not feasible without changing the driver, and there is no Kepler-supporting driver newer than R470.**
 
 [r470-rn]: https://docs.nvidia.com/datacenter/tesla/tesla-release-notes-470-256-02/index.html
 
