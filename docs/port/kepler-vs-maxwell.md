@@ -53,7 +53,7 @@ This empirically confirms what Story 0.3 inferred:
 - **Driver 470.256.02** — exactly the latest R470 release whose release notes Story 0.3 cited. R470 is the last branch supporting Kepler.
 - **Driver-reported CUDA Version: 11.4** — matches our toolkit pin.
 - **Two compute dies exposed as separate CUDA devices** (Bus IDs `04:00.0` and `07:00.0`). Each die has 11441 MiB ≈ **11.45 GiB** VRAM. This is consistent with the public K80 datasheet (12 GiB per die, less reserved overhead).
-- **Per-die TDP: 149 W** (`Pwr:Usage/Cap` shows 149 W cap each). Two dies × 149 W ≈ 298 W board TDP — consistent with the public 300 W board TDP.
+- **Per-die power cap: 149 W** (`Pwr:Usage/Cap` reports the runtime cap, settable via `nvidia-smi -pl` — which `CLAUDE.md` forbids on this hardware). Two dies × 149 W ≈ 298 W under cap, consistent with the public 300 W board TDP.
 - **The host has no nvcc on PATH.** Toolchain lives inside the K80 builder Docker image (CUDA 11.4 toolkit), not on the host. Driver and toolkit are deliberately separated.
 
 This closes Story 0.3's open question about the precise runner driver version.
@@ -134,11 +134,23 @@ This closes Story 0.3's open question about the precise runner driver version.
 From the runner's `nvidia-smi` output (§2) and the public K80 datasheet:
 
 - **Dual-die board:** 2× GK210, exposed as two CUDA devices. ✓ confirmed empirically.
-- **Per-die:** 11441 MiB VRAM, 149 W TDP cap. ✓ confirmed empirically.
-- **Board TDP:** ~300 W (2 × 149 W). Confirms `CLAUDE.md`'s power-risk rule: TP=2 lights up both dies, putting full board draw on the rail. The K80 EPS-cable observation in `CLAUDE.md` ("2× K80 on a shared CPU EPS connector can exceed the rail rating under full load") follows from this — the rail constraint is real and unmodelable from spec sheets alone.
+- **Per-die:** 11441 MiB VRAM, 149 W runtime power cap (per `nvidia-smi`). ✓ confirmed empirically.
+- **Board TDP:** ~300 W. Confirms `CLAUDE.md`'s power-risk rule: TP=2 lights up both dies, putting full board draw on the rail. The K80 EPS-cable observation in `CLAUDE.md` ("2× K80 on a shared CPU EPS connector can exceed the rail rating under full load") follows from this — the rail constraint is real and unmodelable from spec sheets alone. The 149 W per-die cap is a *runtime* setting reported by `Pwr:Usage/Cap`; it can be modified by `nvidia-smi -pl`, which `CLAUDE.md` explicitly forbids on this hardware (has caused system halts in the past).
 - **PCIe Gen3 x16, no NVLink.** Already encoded in `NCCL_P2P_DISABLE=1` from prior K80 work.
 
-This information also bounds the long-context unlock claim of Story #54: **5.4 GB free per die after weights + KV cache** (per Phase-1 instrumentation logs in PR #11, smoke run output) — moving from sm_37 SDPA to a flash-style attention buys back the activations component of the budget, which on Phase-1 measurements was ~0.30 GiB. The headroom for longer context is bounded by per-die VRAM, not by attention algorithm — but flash-style does shift the bottleneck location.
+This information also bounds the long-context unlock claim of Story #54. Phase-1 instrumentation in PR #11 (CI run [24897047481][run-24897047481], TinyLlama-1.1B FP32 at TP=1) measured the actual VRAM trajectory:
+
+| Stage | Free per die |
+|---|---|
+| Baseline after CUDA init | 11157 MiB (≈ 10.90 GiB) |
+| After `load_model` (weights = 4198 MiB) | 6959 MiB (≈ 6.80 GiB) |
+| After `determine_num_available_blocks` profile | 6871 MiB (≈ 6.71 GiB) |
+| After KV cache alloc (`kv_cache_mib=5194`) | **1677 MiB (≈ 1.64 GiB)** |
+| After warmup forward | 1677 MiB |
+
+So on the smoke-test workload, ~1.64 GiB stayed free at peak. KV cache consumed about 5.07 GiB at the configured `gpu_memory_utilization=0.85`. Larger models would shift this further — that's the headroom flash-style attention would buy back at long contexts. The bottleneck is per-die VRAM, not attention algorithm; flash-style shifts the cost from O(N²) activations to O(N), which matters most when context length is the binding constraint.
+
+[run-24897047481]: https://github.com/dogkeeper886/vllm/actions/runs/24897047481
 
 ## 10. Bottom line for the port
 
@@ -179,7 +191,7 @@ The one caveat — `__shfl_sync` semantics differ pre-Volta vs Volta+ — is exa
 
 **Phase 2 (XFormers):** Same. Once CUTLASS produces sm_37 kernels, XFormers' fp32 path (which Story 0.1 noted is sm_50+ documented) should run on sm_37 — the documented sm_50 minimum was a labeling artifact in CUTLASS, not a hardware requirement.
 
-**Phase 3 (FlashAttention):** Story 0.2's rewrite recommendation stands and is **strengthened** by this story. The wall is the FA kernel's tensor-core dependency (sm_70+), not anything sm_37 lacks structurally. A SIMT FP32 reimplementation of the FA algorithm has every primitive it needs on Kepler — scalar FMA, 48 KB shared memory, FP32 atomics, `__syncthreads()`. Smaller per-SM shared memory than Maxwell would be the only constraint... wait — actually GK210 has *more* per-SM shared memory than GM107 (112 KB vs 64 KB), so even the per-SM constraint is more permissive on Kepler.
+**Phase 3 (FlashAttention):** Story 0.2's rewrite recommendation stands and is **strengthened** by this story. The wall is the FA kernel's tensor-core dependency (sm_70+), not anything sm_37 lacks structurally. A SIMT FP32 reimplementation of the FA algorithm has every primitive it needs on Kepler — scalar FMA, 48 KB shared memory per block, FP32 atomics, `__syncthreads()`. GK210's per-SM shared memory (112 KB) and register file (128 K) actually exceed GM107's (64 KB / 64 K), so per-SM constraints are *more* permissive on Kepler than on Maxwell.
 
 **The hardware does not block any of Phase 1 / 2 / 3.** What blocks Phase 3 is the *implementation choice* in FA's source (tensor-core MMA atoms, no SIMT path), not the hardware. That's Story 0.2's territory; this story confirms the hardware story isn't an additional obstacle.
 
