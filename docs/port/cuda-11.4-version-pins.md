@@ -73,10 +73,10 @@ FlashAttention's CUDA minimum has been ratcheted up three times. Confirmed via `
 
 | Version | Tag commit | Date | CUDA minimum |
 |---|---|---|---|
-| v2.0.0 | (initial v2 release) | 2023-07 | `< 11.0` → RuntimeError |
+| v2.0.0 | `4f285b3547` | 2023-07-17 | `< 11.0` → RuntimeError |
 | **v2.1.0** | `9e5e8bc91e` | **2023-08-21** | `< 11.4` → RuntimeError |
 | v2.2.0 | `6d673cd9610` | 2023-09-05 | `< 11.6` → RuntimeError |
-| v2.5.x | (around `e371bea`) | 2024-09-06 | `< 11.7` → RuntimeError |
+| (between v2.4 and v2.5) | `e371bea04f` | 2024-09-06 | `< 11.7` → RuntimeError |
 | HEAD | `ac6f2eb541` | 2026-04-23 | `< 11.7` → RuntimeError |
 
 The bump from 11.4 to 11.6 was commit **`0c04943fa2`** ("Require CUDA 11.6+, clean up setup.py", 2023-09-03), landed in v2.2.0.
@@ -150,23 +150,41 @@ Story 0.1 left this as an open question. Resolving it here is critical because i
 
 ### 5.1 The toolkit side — Kepler in NVCC
 
-NVIDIA's NVCC has supported sm_37 codegen since CUDA 6.0. Across the 11.x line:
+NVIDIA's CUDA Toolkit release notes give a clear three-state timeline:
 
-- CUDA 11.0 — 11.8: Kepler (sm_35, sm_37) supported but **deprecated** (compile-time warning)
-- CUDA 12.0+: Kepler **removed** from NVCC entirely; cannot generate sm_37 binaries
+- **CUDA 11.0** ([release notes][cuda-11.0-rn]) — *"Support for the following compute capabilities are deprecated in the CUDA Toolkit: sm_35 (Kepler), sm_37 (Kepler), sm_50 (Maxwell)"*. This is when sm_37 became "deprecated but supported."
+- **CUDA 11.8** ([release notes][cuda-11.8-rn], the last 11.x) — *"Support for the following compute capabilities are deprecated for all libraries: sm_35 (Kepler), sm_37 (Kepler)"*. Same deprecated-but-supported state.
+- **CUDA 12.0** ([release notes][cuda-12.0-rn]) — *"Kepler architecture support is removed from CUDA 12.0."* Plus: *"Support for the following compute capabilities is removed for all libraries: sm_35 (Kepler), sm_37 (Kepler)"*. NVCC can no longer emit sm_37 binaries.
 
 So at the **toolkit level**, CUDA 11.4, 11.6, 11.7, 11.8 all build sm_37 fine. There is no "going up to 11.7 loses Kepler" toolkit-side constraint.
 
+[cuda-11.0-rn]: https://docs.nvidia.com/cuda/archive/11.0/cuda-toolkit-release-notes/index.html
+[cuda-11.8-rn]: https://docs.nvidia.com/cuda/archive/11.8.0/cuda-toolkit-release-notes/index.html
+[cuda-12.0-rn]: https://docs.nvidia.com/cuda/archive/12.0.0/cuda-toolkit-release-notes/index.html
+
 ### 5.2 The driver side — this is the actual constraint
 
-The Linux NVIDIA driver branches that ship with K80 support:
+NVIDIA's R470 data-center driver release notes ([latest 470.256.02][r470-rn], 2024-06-04) state under "Supported NVIDIA Data Center GPUs":
 
-- Driver R470 (last LTS branch supporting Kepler): supports up to CUDA 11.4 runtime
-- Driver R510+: dropped Kepler
+> *"Release 470 will be the last driver branch to support Data Center GPUs based on the NVIDIA Kepler architecture."*
 
-A K80 host running the R470 LTS driver **cannot load** binaries linked against CUDA 11.7's runtime — the driver is too old. The binary would fail at process start with `CUDA error 100: no CUDA-capable device is detected` or `CUDA error 35: CUDA driver version is insufficient for CUDA runtime version`.
+And under §1.1 "Software Versions":
 
-So our CUDA 11.4 pin is enforced by the **host driver**, not by the toolkit. The K80 self-hosted CI runner is on R470 because that's the last driver that actually supports K80. **Bumping the toolkit to 11.7 is not feasible without a different driver, and there is no Kepler-supporting driver newer than R470.**
+> *"CUDA Toolkit 11: 11.4"*
+
+Tesla K80 is listed in R470's supported "Data Center K-Series Products" table.
+
+So:
+
+- **R470 is the last NVIDIA driver branch that supports K80** (per the R470 release notes' own assertion).
+- **R470 supports CUDA Toolkit 11.4 at runtime** (per the same release notes).
+- Branches after R470 (R515 onwards in the production lineage) drop Kepler.
+
+A K80 host running R470 **cannot load** binaries linked against the CUDA 11.7 runtime — the driver is too old. The binary fails at process start with a "driver version is insufficient for CUDA runtime version" error class.
+
+This means our CUDA 11.4 pin is enforced by the **host driver**, not by the toolkit. The K80 self-hosted CI runner is on R470 because that's the last driver branch that supports K80. **Bumping the toolkit to 11.7 is not feasible without changing the driver, and there is no Kepler-supporting driver newer than R470.**
+
+[r470-rn]: https://docs.nvidia.com/datacenter/tesla/tesla-release-notes-470-256-02/index.html
 
 This makes the FA bump from v2.1.0 (CUDA 11.4 OK) to v2.2.0+ (CUDA 11.6 required) a **hard wall for any port-path strategy**. Not because CUDA 11.6 lacks Kepler (it has it), but because the K80 host's R470 driver can't run anything compiled against 11.5+.
 
@@ -184,7 +202,7 @@ Subject to Story 0.6's consolidation:
 |---|---|---|---|
 | **CUTLASS** | HEAD (`7a9fe055cb`) | Builds on 11.4 with no warnings since v3.0.0; SIMT path Story 0.1 found is unchanged | ✅ |
 | **FlashAttention** | Not pinned (rewrite path, Story #38) | Story 0.2 recommends rewrite, not port. v2.1.0 is the fallback if the recommendation is overturned. | v2.1.0: ✅ / HEAD: ❌ |
-| **XFormers** | HEAD (`ca6d2aa0d4`) | No hard CUDA gate; bundled CUTLASS submodule accepts 11.4. Patches identified in Story 0.1 / 2.x are independent of toolkit version. | ✅ |
+| **XFormers** | HEAD (`ca6d2aa0d4`) | No hard CUDA gate; bundled CUTLASS submodule (currently `8afb19d9`) accepts 11.4. Patches identified in Story 0.1 / 2.x are independent of toolkit version. *Caveat:* future XFormers releases could bump the bundled CUTLASS to a commit that drops 11.4 acceptance — risk lives one transitive dependency away. | ✅ |
 
 ## 7. Forced-upgrade dilemma — none, given the right pins
 
