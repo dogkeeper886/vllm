@@ -1,0 +1,14 @@
+diff --git a/include/cutlass/arch/arch.h b/include/cutlass/arch/arch.h
+index c9c636a0..6cb78aa8 100644
+--- a/include/cutlass/arch/arch.h
++++ b/include/cutlass/arch/arch.h
+@@ -65,6 +65,9 @@ int SmId() {
+ #endif
+ 
+ ////////////////////////////////////////////////////////////////////////////////////////////////////
++struct Sm37 {
++  static int const kMinComputeCapability = 37;
++};
+ struct Sm50 {
+   static int const kMinComputeCapability = 50;
+ }; 
