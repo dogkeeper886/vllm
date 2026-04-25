@@ -252,7 +252,23 @@ Minimum-viable port (SIMT-only, no tensor-op aspirations):
 
 ## 8. Build system
 
-`CMakeLists.txt:86–90` requires CUDA Toolkit ≥ 11.3 (recommends 11.8). The K80 fork is on **CUDA 11.4**, which satisfies this minimum.
+`CMakeLists.txt:86–91` defines CUTLASS's CUDA Toolkit policy as a sliding scale of warnings, not a hard floor:
+
+```cmake
+if (CUDA_VERSION VERSION_LESS 11.3)
+  message(WARNING "CUTLASS ${CUTLASS_VERSION} requires CUDA 11.4 or higher, ...")
+elseif (CUDA_VERSION VERSION_LESS 11.4)
+  message(WARNING "CUTLASS ${CUTLASS_VERSION} support for CUDA ${CUDA_VERSION} is deprecated, please use CUDA 11.8 or higher.")
+endif()
+```
+
+So:
+
+- CUDA < 11.3 → warning ("requires 11.4 or higher"); no FATAL_ERROR
+- CUDA 11.3 → deprecation warning, recommends 11.8+
+- CUDA 11.4 (our pin) → builds without an explicit warning, but CUTLASS "strongly recommends" 11.8+
+
+The K80 fork's CUDA 11.4 is **at the edge of CUTLASS's tested matrix, not comfortably inside it**. CUTLASS marks 11.4 as supported but flags 11.3 as deprecated, and the asymmetric phrasing ("strongly recommends 11.8+") implies the testing focus is on newer toolkits. Story 0.3 (CUDA 11.4 compatibility survey, [#21][s03]) is where this gets quantified — what specific CUTLASS features may regress on 11.4 vs 11.8 is unknown from this doc alone.
 
 `CMakeLists.txt:609–662` handles `CMAKE_CUDA_ARCHITECTURES` generically. **There is no allow-list of acceptable SM values.** Adding `37` to the list passes through to `nvcc -gencode arch=compute_37,code=sm_37` without complaint.
 
@@ -260,49 +276,55 @@ NVCC has supported sm_37 codegen since CUDA 6.0 and continues to support it thro
 
 CUTLASS is largely header-only. The build artifact for our purposes is just the propagated arch flag — there is nothing to gate at the `cutlass/` library level.
 
-## 9. Open questions / unknowns
+[s03]: https://github.com/dogkeeper886/vllm/issues/21
 
-These are not blockers for Story 0.6 (consolidation), but they are things this doc cannot answer alone and should feed into adjacent stories:
+## 9. Open questions / unknowns / forward risks
+
+These are not blockers for Story 0.6 (consolidation), but they are things this doc cannot answer alone and should feed into adjacent stories or be tracked as ongoing risks:
 
 1. **Does the warp MMA's hard-coded `ArchTag = arch::Sm50` (mma_simt.h:114) cause incorrect kernel selection for an Sm37-tagged GEMM at runtime?** Static analysis says no — the hard-coding is a type label internal to the SIMT chain. But until we compile and run a CUTLASS Sm37 GEMM on real K80 hardware (Phase 1 Story [#28][s14]), this remains a hypothesis.
 
-2. **Do the FlashAttention / XFormers attention kernels reach `grouped_problem_visitor.h`?** Story [#20][s02] (FA MMA dependency map) needs to answer this. If yes, we have an additional file to patch.
+2. **Stability risk: CUTLASS's own comment is "Hard-coded for now"** (`mma_simt.h:113`). The "for now" implies upstream expects to parameterize the warp-MMA `ArchTag` in the future. If they do, our patches assume the current structure and will need rework on each CUTLASS bump. **Pin a specific CUTLASS commit and document the deprecation triggers** as part of Story [#30][s16] (pin CUTLASS as a build dependency).
 
-3. **Are there any `__shfl_sync` or other sm_70+ intrinsics in the cutlassF attention kernels that XFormers ships?** Story 0.2 again — that recon pass will examine XFormers' attention code, not just FA's.
+3. **Forward risk: CUTLASS's CUDA 11.4 deprecation curve.** Today CUTLASS supports CUDA 11.4 with a "strongly recommends 11.8+" warning. CUTLASS already deprecated CUDA 11.3 entirely. If a future CUTLASS release drops 11.4 and we cannot upgrade CUDA (because newer drivers may have removed Kepler support), our pin is locked at the last 11.4-supporting CUTLASS version. This caps the long-term value of the port at whatever feature set ships up to that point. Should be flagged in Story 0.6's GO/NO-GO writeup as a project-lifetime constraint.
 
-4. **Are there CUTLASS examples of pre-Maxwell forks?** Story [#23][s05] (prior art) covers this. If somebody has already done Sm37 in a fork, even a half-finished one, we save weeks.
+4. **Do the FlashAttention / XFormers attention kernels reach `grouped_problem_visitor.h`?** Story [#20][s02] (FA MMA dependency map) needs to answer this. If yes, we have an additional file to patch.
+
+5. **Are there any `__shfl_sync` or other sm_70+ intrinsics in the cutlassF attention kernels that XFormers ships?** Story 0.2 again — that recon pass will examine XFormers' attention code, not just FA's.
+
+6. **Are there CUTLASS examples of pre-Maxwell forks?** Story [#23][s05] (prior art) covers this. If somebody has already done Sm37 in a fork, even a half-finished one, we save weeks.
 
 [s02]: https://github.com/dogkeeper886/vllm/issues/20
 [s05]: https://github.com/dogkeeper886/vllm/issues/23
 [s14]: https://github.com/dogkeeper886/vllm/issues/28
 
-## 10. Implications for Phase 1
+## 10. Implications for Phase 1 (CUTLASS-only)
 
-Subject to Story 0.6's GO call after the rest of Phase 0 lands, the Phase 1 stories now look like this:
+Story 0.6 will consolidate this with the other Phase 0 outputs to produce final Phase 1 estimates. From this story alone:
 
 - **#25 (Add `Sm37` arch trait):** ~one-line edit in `include/cutlass/arch/arch.h`. **High confidence, near-zero scope.**
 - **#26 (GEMM trait specialization):** **No new specializations needed** for the SIMT path — Sm37 is picked up by the existing `!is_same<Sm80>` gate. Story can probably close as "no work required" once this is empirically verified.
 - **#27 (Verify SIMT-only):** static analysis already strongly suggests yes (§5). Confirmation comes from a runtime check in #28.
 - **#28 (Compile minimal CUTLASS GEMM for sm_37 on K80):** the actual interesting story — this is where we discover whether the static analysis above survives contact with real hardware.
 - **#29 (Numerical correctness vs cuBLAS):** standard.
-- **#30 (Pin CUTLASS fork):** the Sm37 patch is so small we may not even need a fork — could potentially upstream a PR to NVIDIA/cutlass. Out of scope for this epic but worth noting.
+- **#30 (Pin CUTLASS fork):** the Sm37 patch is so small we may not even need a fork — could potentially upstream a PR to NVIDIA/cutlass. Out of scope for this epic but worth noting. The "Hard-coded for now" comment in `mma_simt.h:113` (see §9 risk 2) makes pin-discipline non-trivial.
 
-The TBD effort estimates in epic #12 should drop significantly for Phase 1 based on this finding. **My current best estimate for Phase 1, pending #28's runtime verification: ~1 week of work, possibly less.** Bigger numbers were assumption-driven.
+Based on Story 0.1 alone, **the CUTLASS portion of Phase 1 looks small.** Story 0.6 produces the consolidated effort estimate covering CUTLASS + everything else; one story's optimistic finding does not justify revising the epic's TBDs unilaterally.
 
-## 11. The bigger picture
+## 11. CUTLASS-only conclusions
 
-Three lines from this report matter most:
+This story examined CUTLASS in isolation. Its conclusions are limited to CUTLASS:
 
 - The arch tags are pure type structs with one integer member. **Adding Sm37 is a one-line change.**
 - The default GEMM dispatch routes any non-Sm80 arch through SIMT — *including* a hypothetical Sm37 — with **no code edits to the dispatcher.**
-- The SIMT path uses scalar FP32 FMA and nothing else from the per-arch instruction set. **Kepler can run scalar FP32 FMA.**
+- The SIMT path uses scalar FP32 FMA and nothing else from the per-arch instruction set. **Kepler sm_37 has FP32 FMA.**
 
-The wall between K80 and CUTLASS is much thinner than it looks from outside. The vLLM gate at `cuda.py:366` ("FlashAttention and xformers require sm_70+/sm_80+") is doubly wrong: XFormers' minimum is actually sm_50, and the underlying CUTLASS that XFormers depends on is structurally one struct away from supporting sm_37.
+**CUTLASS does not present the wall I previously assumed.** Whether XFormers and FlashAttention present a wall — through their own SM gates, their own sm_70+ intrinsic use, or pieces of CUTLASS this story did not examine (e.g., specific kernel paths the attention codepath traverses) — is left to Story [#20][s02] (FA MMA dependency map) and Story 2.x's static analysis of XFormers attention.
 
-That doesn't mean the rest of the epic is easy — Phases 2 and 3 still need to deal with XFormers' and FA's own SM gates and any sm_70+ intrinsics they use directly (not through CUTLASS). But the long-pole assumption — "you'd be porting CUTLASS itself" — is much smaller than my [first take in PR review][assumption-correction] suggested.
+The methodology rule applied to my own work: my [PR-review claim][assumption-correction] that "porting XFormers means porting CUTLASS itself" was assumption-driven. This story revises only the CUTLASS half. The XFormers / FA halves remain to be checked the same way.
 
 [assumption-correction]: https://github.com/dogkeeper886/vllm/issues/12
 
 ---
 
-**End of Story 0.1 deliverable.** Story 0.2 (FlashAttention MMA dependency map, [#20][s02]) is the recommended next pickup — its findings determine whether the optimistic picture above survives the FA-specific scrutiny.
+**End of Story 0.1 deliverable.** Story 0.2 (FlashAttention MMA dependency map, [#20][s02]) is the recommended next pickup. Story 0.6 owns the consolidated GO/NO-GO call across all of Phase 0.
