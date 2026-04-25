@@ -1,0 +1,43 @@
+name: K80 Host Info
+
+# Pure read-only status query of the self-hosted K80 runner.
+# No GPU compute, no docker, no TP. Safe at any time.
+# Produced output is the citation source for docs/port/cuda-11.4-version-pins.md
+# §5 (driver / toolkit / Kepler support claims).
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: k80-hardware
+  cancel-in-progress: false
+
+jobs:
+  info:
+    name: GPU + toolkit + OS info
+    runs-on: [self-hosted, vllm]
+
+    steps:
+      - name: nvidia-smi
+        run: |
+          echo "=== nvidia-smi ==="
+          nvidia-smi || true
+          echo ""
+          echo "=== nvidia-smi structured query ==="
+          nvidia-smi --query-gpu=name,compute_cap,driver_version --format=csv || true
+
+      - name: nvcc / CUDA toolkit
+        run: |
+          echo "=== nvcc --version ==="
+          nvcc --version 2>&1 || echo "(nvcc not on PATH)"
+          echo ""
+          echo "=== /usr/local/cuda symlink ==="
+          ls -ld /usr/local/cuda* 2>/dev/null || true
+
+      - name: Host OS + kernel
+        run: |
+          echo "=== /etc/os-release ==="
+          cat /etc/os-release || true
+          echo ""
+          echo "=== uname -a ==="
+          uname -a
