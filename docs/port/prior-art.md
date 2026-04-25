@@ -79,7 +79,12 @@ There is one **Pascal** sibling worth referencing:
 
 URL: https://github.com/fcheung2888/llama.cpp-kepler
 
-What it does: patch set + Python applier (`kepler-patch-all.py`) that makes upstream llama.cpp build for **sm_30** (Kepler GK104 / K2000M class) under CUDA 10.2 + GCC 8 + driver 470. Ten files patched:
+What it does: patch set + Python applier (`kepler-patch-all.py`) that makes upstream llama.cpp build for **sm_30** (Kepler GK104 / K2000M class) under CUDA 10.2 + GCC 8 + driver 470. Verified by inspecting the script: **10 distinct files patched** across the ggml-cuda tree and build system —
+
+- 8 ggml-cuda source files: `binbcast.cu`, `common.cuh`, `fattn-common.cuh`, `fattn-vec.cuh`, `ggml-cuda.cu`, `softmax.cu`, `vendors/cuda.h`, plus `ggml/src/ggml-cuda/CMakeLists.txt`
+- 2 build-system files: `ggml/CMakeLists.txt`, `ggml/src/CMakeLists.txt`
+
+Patch types (via 27 `patch_file` / `patch_file_regex` invocations across 12 logical sections in the script):
 
 - Shims `__shfl_sync` → `__shfl` (matches Story 0.4's notes about Volta+ semantics not being needed)
 - Stubs bf16 types (Story 0.4 confirmed Kepler has no native bf16)
@@ -169,9 +174,9 @@ No upstream llama.cpp **PR** has merged sm_37 support; all known support is via 
 
 ### 4.1 SparkAttention (Volta-specific)
 
-[arXiv 2502.12784](https://arxiv.org/abs/2502.12784) — "High-Performance Multi-Head Attention for Large Models on Volta GPU Architecture." Volta-specific (sm_70), uses tensor cores. Does not discuss Kepler.
+[arXiv 2502.12784](https://arxiv.org/abs/2502.12784) — *"SparkAttention: High-Performance Multi-Head Attention for Large Models on Volta GPU Architecture"* (submitted Feb 2025; published in *CCF Transactions on High Performance Computing*, 2025). Volta-specific (sm_70), uses Tensor Core Units. Does not discuss Kepler. Verified directly via WebFetch of the arXiv abstract page.
 
-Why it matters to us: the paper exists *because* even Volta hit the upstream-FA gap. The structural argument ("modern attention libraries ignore older architectures, custom rewrite needed") parallels our case. **The kernels themselves don't transfer (sm_70 tensor cores are required), but the existence of two precedent rewrites — Volta (SparkAttention) and Turing (ssiu/flash-attention-turing) — triple-validates Story 0.2's "rewrite, not port" recommendation when extended to Kepler.**
+Why it matters to us: the paper exists *because* even Volta hit the upstream-FA gap. The structural argument ("modern attention libraries ignore older architectures, custom rewrite needed") parallels our case. **The kernels themselves don't transfer (Volta tensor cores are required), but the existence of two precedent rewrites — Volta (SparkAttention) and Turing (ssiu/flash-attention-turing) — triple-validates Story 0.2's "rewrite, not port" recommendation when extended to Kepler.**
 
 ### 4.2 Other arXiv searches
 
