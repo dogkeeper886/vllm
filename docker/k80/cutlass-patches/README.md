@@ -48,7 +48,7 @@ Adds `struct Sm37 { static int const kMinComputeCapability = 37; };` to `include
 
 ## Applying the patches
 
-The patches are not yet wired into the build pipeline. Story #28 will integrate them via either:
+**Status:** the patches are not yet wired into the build pipeline. Story #28 will integrate them via either:
 
 1. A `prepare_cutlass.sh` script run inside the K80 builder image, between `FetchContent_Declare(cutlass)` and the actual build, or
 2. A CMake `execute_process(COMMAND patch ...)` call gated on `VLLM_K80_FORK=ON`.
@@ -65,6 +65,27 @@ A dry-run check:
 ```bash
 git apply --check docker/k80/cutlass-patches/sm37-trait.patch
 ```
+
+### Idempotency
+
+**Patches in this directory are not idempotent.** A second `git apply` of the same patch against an already-patched tree fails with `error: patch does not apply`. This is expected git-apply behavior, but it matters for repeated builds (Docker image rebuilds, dev iteration, CI re-runs) where the build script may run against either a freshly-fetched CUTLASS or a previously-patched copy.
+
+Recommended patterns for build-pipeline integration (Story #28 will pick one):
+
+```bash
+# Option A — explicit pre-check via grep marker
+grep -q "struct Sm37" include/cutlass/arch/arch.h \
+  || git apply /path/to/sm37-trait.patch
+
+# Option B — 3-way merge handles already-applied (also more robust against
+# upstream additions near the patch site)
+git apply -3 /path/to/sm37-trait.patch
+
+# Option C — GNU patch's --forward flag skips already-applied hunks
+patch -p1 --forward < /path/to/sm37-trait.patch
+```
+
+Option B (`git apply -3`) is the most durable when CUTLASS-side context drifts; future maintainers should prefer it unless there's a specific reason not to.
 
 ## Conventions for new patches
 
