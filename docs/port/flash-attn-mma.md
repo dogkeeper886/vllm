@@ -194,10 +194,10 @@ compute_attn_1rowblock        (algorithm — portable C++)
 
 In principle, swapping the Atom for a SIMT FP32 implementation would let the algorithm run unchanged. **In practice:**
 
-1. CUTLASS does not ship a SIMT MMA Atom matching the 16×8×16 or 16×8×8 shapes FA expects. The closest is the warp-level `MmaSimt` from Story [#19][s01] which uses scalar 1×1×1 FMA (`mma_sm50.h:61–143`). Re-tiling the FA inner loop to use scalar SIMT is non-trivial — the register layout, shared-memory swizzle (`SmemLayoutQ` etc. at `kernel_traits.h:117–146`), and bank-conflict avoidance are all designed for tensor-core access patterns.
+1. The CUTLASS SIMT atoms surveyed in Story [#19][s01] (`mma_sm50.h:61–143`, the warp-level `MmaSimt`) are scalar 1×1×1 FMA — much smaller than the 16×8×16 or 16×8×8 shapes FA expects. Whether larger SIMT atoms exist in unexamined CuTe paths in CUTLASS is not yet established. Re-tiling the FA inner loop to use scalar SIMT is non-trivial — the register layout, shared-memory swizzle (`SmemLayoutAtomQ` with its `Swizzle<kSwizzle, 3, 3>{}` composition at `kernel_traits.h:79–86`, plus `SmemLayoutQ` and `SmemLayoutKV` at `kernel_traits.h:84` and `:88`), and bank-conflict avoidance are all designed for tensor-core access patterns.
 2. The fallback Atom in §4.1 (SM75) does not buy us anything: it is still a tensor-core atom, just on Turing instead of Ampere.
 
-So while the algorithm is structurally separable, **there is no drop-in replacement Atom that runs on sm_37**. Any port would require either (a) writing a SIMT Atom for CUTLASS that matches FA's expected shapes, or (b) rewriting the kernel against a different abstraction.
+So while the algorithm is structurally separable, **there is no drop-in replacement Atom that runs on sm_37 in the CUTLASS surface area surveyed so far**. Any port would require either (a) writing a SIMT Atom for CUTLASS that matches FA's expected shapes, or (b) rewriting the kernel against a different abstraction.
 
 ## 6. Does FA reach CUTLASS's `grouped_problem_visitor.h`?
 
@@ -207,12 +207,23 @@ So while the algorithm is structurally separable, **there is no drop-in replacem
 
 ## 7. SIMT fallback — does FA have one?
 
-**No.** Several places to look, all empty:
+**No SIMT FP32 fallback for CUDA hardware exists.** Several places to look, all empty for our purposes:
 
 1. **No SIMT Atom in the kernel template.** The fallback in `kernel_traits.h:36` is the SM75 Turing Atom, not a SIMT FP32 path.
-2. **No CPU / pure-Python reference attention** in `flash_attn/`. `flash_attn/flash_attn_interface.py:23` delegates directly to the compiled CUDA module; there is no `if not cuda_available: use_pytorch()` branch.
+2. **No CPU / pure-Python reference attention** in `flash_attn/`. There is no `if not cuda_available: use_pytorch()` branch.
 3. **No `simt` namespace, no `if __CUDA_ARCH__ < 700: ...`** branches in the kernel C++ code.
 4. **No reference-quality PyTorch implementation** elsewhere in the tree. Tests under `tests/` use FA's own kernels as ground truth.
+
+There is, however, a non-CUDA backend dispatch worth noting. `flash_attn/flash_attn_interface.py:21–24`:
+
+```python
+if USE_TRITON_ROCM:
+    from aiter.ops.triton._triton_kernels.flash_attn_triton_amd import flash_attn_2 as flash_attn_gpu
+else:
+    import flash_attn_2_cuda as flash_attn_gpu
+```
+
+The `USE_TRITON_ROCM` path uses a Triton kernel from `aiter` for AMD ROCm hardware. **This is irrelevant for K80 (we are CUDA, not ROCm) and is not a SIMT path** — Triton compiles to PTX/HIP, not SIMT loops. But its existence is a structural hint for Story [#38][s32b]: a Triton-CUDA implementation could plausibly piggyback on the algorithm logic already factored out for the AMD path. Whether Triton can target sm_37 is an open question that Story 3.2b would need to answer before committing to that strategy.
 
 The Turing-only [flash-attention-turing](https://github.com/ssiu/flash-attention-turing) fork referenced in the README is a separate project — confirms upstream's stance that pre-Ampere variants are out-of-tree work, not a maintained codepath.
 
@@ -265,11 +276,13 @@ The reasoning, anchored in source:
 
 ### What "rewrite" practically means
 
-This is **Story 3.2b** (#38). Three implementation strategies, in rough order of pragmatism:
+This is **Story 3.2b** (#38). Three candidate implementation strategies, in rough order of pragmatism:
 
-- **Triton kernel.** Triton 2.x has historically supported older arches via PTX backends; if it can target sm_37 (open question — verify before committing), implementing FA's algorithm in Triton is order-of-magnitude less work than hand-written CUDA. Triton handles tile layout, register allocation, and scheduling automatically.
-- **Hand-written CUDA, FP32 SIMT.** Write a `flash_fwd_sm37.cu` that follows FA's algorithm but uses scalar `__fma_rn` and standard `__syncthreads()`. Probably 2–4 weeks of focused work. Tile sizes will be smaller because K80 has 48 KB shared memory (vs 96+ KB on Ampere), so per-block batch is reduced. The expected speedup on K80 is modest (K80 is memory-bound, not compute-bound, so the O(N) memory benefit is the real prize, not throughput).
+- **Triton kernel.** Triton has historically supported older arches via PTX backends; if it can target sm_37 (open question — verify before committing), implementing FA's algorithm in Triton is order-of-magnitude less work than hand-written CUDA. Triton handles tile layout, register allocation, and scheduling automatically. The existence of an AMD Triton path in the FA tree (§7) suggests the algorithm has already been factored for non-CUDA-PTX backends.
+- **Hand-written CUDA, FP32 SIMT.** Write a `flash_fwd_sm37.cu` that follows FA's algorithm but uses scalar `__fma_rn` and standard `__syncthreads()`. Tile sizes would be smaller because K80 has 48 KB shared memory (vs 96+ KB on Ampere), so per-block batch is reduced. The expected speedup on K80 is modest — K80 is memory-bound, not compute-bound, so the O(N) memory benefit (long-context unlock, story #54) is the real prize, not throughput.
 - **Reuse FA's softmax helpers.** `csrc/flash_attn/src/softmax.h` (online softmax statistics) is mostly arch-agnostic and could be reused regardless of which strategy above is picked. Worth pulling into a rewrite even if everything else is from scratch.
+
+**Effort estimate intentionally omitted.** Story 0.6 owns the consolidated effort estimate across all of Phase 0. This story alone is not enough evidence to commit to a number — it depends on which strategy is chosen, on Story 0.3's findings about CUDA toolkit pin options, on Story 0.5's prior art (does the Turing fork or another project already give us 80% of the work?), and on the user's resolution of the issue #2 conflict.
 
 ### What this means for issue #2 study plan
 
@@ -287,11 +300,11 @@ Story 3.2b explicitly conflicts with issue #2's "Explicitly skipping → Writing
 
 ## 12. Implications for Phase 3 stories
 
-Subject to Story 0.6's GO call, the Phase 3 story tickets now look like:
+Subject to Story 0.6's GO call, this story's evidence supports the following Phase 3 routing — but Story 0.6 owns the final decisions:
 
-- **#36 (Decide port vs rewrite):** This story already has the answer — **rewrite**, with citations above. Can close as soon as Story 0.6 consolidates.
-- **#37 (port path 3.2a):** **Should close as "not pursued"** — there is no viable port path given the source state.
-- **#38 (rewrite path 3.2b):** **The actual Phase 3 work.** Effort is genuinely large (weeks-to-months). Conflict with issue #2 needs explicit user resolution before this story starts.
+- **#36 (Decide port vs rewrite):** Story 0.2 produces a citation-backed recommendation of "rewrite." Story 0.6 consolidates with the other Phase 0 outputs and either ratifies or revisits.
+- **#37 (port path 3.2a):** Story 0.6 should evaluate closing as "not pursued" — there is no viable port path given FA's current source state. Not closing it unilaterally here.
+- **#38 (rewrite path 3.2b):** The actual Phase 3 work if the recommendation is ratified. Conflicts with issue #2's "no CUDA kernels from scratch" line — Story 0.6 must surface this for explicit user resolution before any 3.2b work starts.
 - **#39 (numerical correctness):** standard.
 - **#40 (performance baseline):** standard. Note expectation: the win on K80 will be the O(N) memory benefit (long-context unlock, story #54), not raw throughput.
 
