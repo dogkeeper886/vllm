@@ -32,17 +32,17 @@ Same reasoning as `cutlass-patches/`: minimal additive changes are smaller than 
 
 ### `sm37-cc-gate.patch` (Story #32)
 
-Lowers XFormers' Python-level minimum compute capability gate at `xformers/ops/fmha/common.py:304`:
+Lowers XFormers' Python-level minimum compute capability gate at `xformers/ops/fmha/common.py:253`:
 
 ```python
 # Before:
 CUDA_MINIMUM_COMPUTE_CAPABILITY: Tuple[int, int] = (5, 0)
 
 # After:
-CUDA_MINIMUM_COMPUTE_CAPABILITY: Tuple[int, int] = (3, 7)  # Tesla K80 (sm_37); lowered from upstream (5, 0)
+CUDA_MINIMUM_COMPUTE_CAPABILITY: Tuple[int, int] = (3, 7)  # Tesla K80 (sm_37) base default
 ```
 
-**Why:** Per Story 0.2 §3.1's analysis of the dispatcher, the runtime check at `common.py:373` uses this value to reject devices below the threshold. With the default `(5, 0)`, an sm_37 device is refused at dispatch time before any kernel is selected — even if `sm37-generate-kernels.patch` produced kernels for it. Both patches are required for a working dispatch chain.
+**Why:** Per Story 0.2 §3.1's analysis of the dispatcher, the runtime check at `common.py:305` uses this value to reject devices below the threshold. With the default `(5, 0)`, an sm_37 device is refused at dispatch time before any kernel is selected — even if `sm37-generate-kernels.patch` produced kernels for it. Both patches are required for a working dispatch chain.
 
 **What this unlocks:** When Story #33 builds and Story #34 runs, `AttentionOpBase.supports()` will accept an sm_37 device instead of refusing it. Per the same Story 0.2 analysis, individual ops can override `CUDA_MINIMUM_COMPUTE_CAPABILITY` upward (e.g. `flash.py` sets `(8, 0)`); those overrides aren't touched by this patch — the gate only loosens for ops that inherit the base.
 
@@ -62,7 +62,7 @@ Adds `37` to the SM list at `xformers/csrc/attention/cuda/fmha/generate_kernels.
 SM = [50, 70, 75, 80, 100]  # Sm80 kernels support up to Sm100
 
 # After:
-SM = [37, 50, 70, 75, 80, 100]  # Sm80 kernels support up to Sm100; Sm37 added for Tesla K80 (K80 attention port; v0.0.23)
+SM = [37, 50, 70, 75, 80, 100]  # Sm80 kernels support up to Sm100; Sm37 added for Tesla K80
 ```
 
 **Why:** Per Story 0.2 §3.3, XFormers' kernel autogen uses this list to materialize per-SM kernel instantiations. Without `37` in the list, `generate_kernels.py` produces zero matching FMHA kernel instantiations for sm_37 — the build silently emits no kernel, and runtime falls through with "no kernel image is available."
@@ -72,7 +72,7 @@ SM = [37, 50, 70, 75, 80, 100]  # Sm80 kernels support up to Sm100; Sm37 added f
 **What this does NOT do:**
 
 - Does not by itself produce a working sm_37 XFormers binary — that is Story #33.
-- Does not patch the Python compute-capability gate at `common.py:391` — that's Story #32, separate one-line patch.
+- Does not patch the Python compute-capability gate at `common.py:253` — that's Story #32, separate one-line patch.
 - Does not change XFormers' bundled CUTLASS submodule. XFormers v0.0.23 bundles CUTLASS at commit `e0aaa3c3` (September 2023, pre-v3.5). **Verified: our `cutlass-patches/sm37-trait.patch` applies cleanly to that bundled CUTLASS as-is** — the `arch.h` structure at the patch site is stable across CUTLASS pre-v3.5 → v4.0.0 → HEAD (Sm50 onwards has been unchanged). Story #33's CUTLASS-side work is therefore: apply the existing patch to the submodule, no separate version is needed.
 
 **Applies to:** XFormers v0.0.23.
