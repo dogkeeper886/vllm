@@ -104,6 +104,36 @@ grep -n "CUDA_MINIMUM_COMPUTE_CAPABILITY: Tuple" "${WORK_DIR}/xformers/xformers/
 echo ""
 
 # -----------------------------------------------------------------------------
+# Step 2c: regenerate autogen kernels (with sm_37)
+# -----------------------------------------------------------------------------
+# CRITICAL: the autogen .cu files are committed to the XFormers repo as
+# pre-generated source. setup.py does NOT invoke generate_kernels.py at build
+# time — running it is a manual developer step that produces the committed
+# files. So our sm37-generate-kernels.patch updates the SCRIPT but not the
+# generated output. We need to run the script ourselves to regenerate the
+# autogen files with sm_37 instantiations included.
+#
+# Symptom of skipping this: build succeeds, .so loads, dispatcher accepts the
+# device, but kernel launch fails with "cutlassF: no kernel found to launch!"
+# because the compiled .so contains _sm50/_sm70/_sm75/_sm80 symbols but no
+# _sm37 (PR #64 review run 24959810424 caught this).
+echo "=== Step 2c: regenerate autogen kernels (with sm_37) ==="
+cd "${WORK_DIR}/xformers"
+python xformers/csrc/attention/cuda/fmha/generate_kernels.py
+# `|| sm37_count=0` defends against `set -o pipefail` — if grep finds zero
+# matches it exits 1, which would otherwise propagate through the pipeline,
+# trip set -e on the assignment, and abort the script before the if-check
+# runs. We want the explicit "expected ≥50" diagnostic to fire instead.
+sm37_count=$(grep -rE "Sm37|sm37" xformers/csrc/attention/cuda/fmha/autogen/ 2>/dev/null | wc -l) || sm37_count=0
+echo "regenerated autogen files contain ${sm37_count} sm_37 references"
+if [ "${sm37_count}" -lt 50 ]; then
+    echo "ERROR: expected ≥50 sm_37 references after autogen; got ${sm37_count}"
+    echo "       (the patched generate_kernels.py may not have produced sm_37 variants)"
+    exit 1
+fi
+echo ""
+
+# -----------------------------------------------------------------------------
 # Step 2b: apply CUTLASS patches to bundled submodule
 # -----------------------------------------------------------------------------
 echo "=== Step 2b: apply CUTLASS patches to bundled submodule ==="
