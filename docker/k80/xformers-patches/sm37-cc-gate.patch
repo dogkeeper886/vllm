@@ -1,5 +1,5 @@
 diff --git a/xformers/ops/fmha/common.py b/xformers/ops/fmha/common.py
-index c862a50..1263730 100644
+index c862a50..244d1f7 100644
 --- a/xformers/ops/fmha/common.py
 +++ b/xformers/ops/fmha/common.py
 @@ -301,7 +301,7 @@ class AttentionOpBase(BaseOperator):
@@ -7,7 +7,7 @@ index c862a50..1263730 100644
      OPERATOR: Any
      SUPPORTED_DEVICES: Set[str]
 -    CUDA_MINIMUM_COMPUTE_CAPABILITY: Tuple[int, int] = (5, 0)
-+    CUDA_MINIMUM_COMPUTE_CAPABILITY: Tuple[int, int] = (3, 7)  # Tesla K80 (sm_37); lowered from upstream (5, 0)
++    CUDA_MINIMUM_COMPUTE_CAPABILITY: Tuple[int, int] = (3, 7)  # Tesla K80 (sm_37) base default
      SUPPORTED_DTYPES: Set[torch.dtype]
      SUPPORTED_MAX_K: float
      SUPPORTED_MIN_K: int = 0
