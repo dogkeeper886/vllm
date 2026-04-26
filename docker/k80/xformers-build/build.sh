@@ -144,7 +144,13 @@ export XFORMERS_DISABLE_TRITON=1
 # --no-build-isolation reuses the system Python's installed build deps
 # (setuptools, wheel, ninja, pybind11, torch). The K80 builder image already
 # has these for vLLM compilation.
-pip install -v --no-build-isolation . 2>&1 | tail -200
+#
+# No `| tail` here — the workflow captures full stdout/stderr to /out/build.log
+# for the artifact. The GitHub-log view is abbreviated by the workflow's own
+# `tail -200 /out/build.log` step. Truncating here would lose the full nvcc
+# output that we need to diagnose first-run failures on a novel
+# (PyTorch 2.0.1 + XFormers v0.0.23 + sm_37) combination.
+pip install -v --no-build-isolation . 2>&1
 
 echo ""
 
