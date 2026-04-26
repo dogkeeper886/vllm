@@ -111,10 +111,13 @@ verify-cutlass-patches: ## Verify cutlass-patches/*.patch apply cleanly to the p
 	done; \
 	echo "all patches apply cleanly to CUTLASS $(CUTLASS_PIN_TAG)"
 
-# XFormers pin — must stay on v0.0.28.post3 because v0.0.29+ removed the
-# cutlass mem-eff backend (commit 3d947a6). See xformers-patches/README.md
-# for the version-rationale detail.
-XFORMERS_PIN_TAG ?= v0.0.28.post3
+# XFormers pin — v0.0.23 (Dec 2023). Two simultaneous constraints force this:
+#   1. v0.0.29+ removed the cutlass mem-eff backend (commit 3d947a6)
+#   2. v0.0.24+ requires torch>=2.1; v0.0.28+ requires torch>=2.4. Our K80
+#      fork uses PyTorch 2.0.1 (CLAUDE.md), so we cap at v0.0.23 (torch>=1.12).
+# v0.0.23 is the latest tag that satisfies BOTH constraints. See
+# xformers-patches/README.md for the full rationale.
+XFORMERS_PIN_TAG ?= v0.0.23
 XFORMERS_PIN_REPO ?= https://github.com/facebookresearch/xformers.git
 
 verify-xformers-patches: ## Verify xformers-patches/*.patch apply cleanly to the pinned XFormers

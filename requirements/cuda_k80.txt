@@ -34,11 +34,14 @@ ray>=2.9.0
 # See docker/k80/cutlass-patches/README.md for the pin-bump workflow when
 # upstream CUTLASS or vLLM's FetchContent revision moves.
 #
-# XFormers — must stay pinned at v0.0.28.post3. After v0.0.29, upstream
-# removed the cutlass mem-eff attention backend ("now embedded in PyTorch").
-# Our K80 fork uses PyTorch 2.0.1, which predates that move — so XFormers
-# HEAD has nothing for our build to consume. v0.0.28.post3 (2024-10-30) is
-# the last tag with the cutlass kernels in-tree.
+# XFormers — must stay pinned at v0.0.23 (Dec 2023). Two constraints force
+# this:
+#   1. v0.0.29+ removed the cutlass mem-eff attention backend ("now embedded
+#      in PyTorch"). Our PyTorch 2.0.1 predates that — so we need a tag
+#      with the kernels still in-tree.
+#   2. v0.0.24+ requires torch>=2.1; v0.0.28+ requires torch>=2.4. We're
+#      capped at PyTorch 2.0.1 by the R470 driver / CUDA 11.4 wall.
+# v0.0.23 is the latest tag satisfying both (torch>=1.12, kernels in-tree).
 #
 # Patches at:
 #   docker/k80/xformers-patches/
