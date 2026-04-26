@@ -35,13 +35,13 @@ SM = [37, 50, 70, 75, 80, 100]  # Sm80 kernels support up to Sm100; Sm37 added f
 
 **Why:** Per Story 0.2 §3.3, XFormers' kernel autogen uses this list to materialize per-SM kernel instantiations. Without `37` in the list, `generate_kernels.py` produces zero matching FMHA kernel instantiations for sm_37 — the build silently emits no kernel, and runtime falls through with "no kernel image is available."
 
-**What this unlocks:** When Story #33 builds XFormers from source against our patched CUTLASS (which has `cutlass::arch::Sm37` from `cutlass-patches/sm37-trait.patch`, Phase 1 verified), the autogen will produce a sm_37 instantiation. The generated kernel will dispatch through CUTLASS's SIMT path (per Story 0.1 §4.2) which Phase 1 verified bit-exact against cuBLAS.
+**What this unlocks:** When Story #33 builds XFormers from source against our patched CUTLASS (which has `cutlass::arch::Sm37` from `cutlass-patches/sm37-trait.patch`, Phase 1 verified), the autogen will emit a sm_37 instantiation per the SM-list dispatch. The expectation, per Story 0.1 / 0.4, is that those kernels dispatch through CUTLASS's SIMT path and run correctly on K80 — verified empirically by Phase 1's reproducer for standalone GEMM. **Story #33 is the equivalent verification gate for the XFormers-side integration**; this PR alone doesn't prove the XFormers attention kernels work end-to-end on K80.
 
 **What this does NOT do:**
 
 - Does not by itself produce a working sm_37 XFormers binary — that is Story #33.
 - Does not patch the Python compute-capability gate at `common.py:391` — that's Story #32, separate one-line patch.
-- Does not change XFormers' bundled CUTLASS submodule. The submodule pin at v0.0.28.post3 is some pre-v3.x CUTLASS commit that may or may not have our `Sm37` patch applicable. Story #33 will determine whether we override the submodule to our patched CUTLASS or apply the same `cutlass-patches/sm37-trait.patch` to the bundled version.
+- Does not change XFormers' bundled CUTLASS submodule. XFormers v0.0.28.post3 bundles CUTLASS at commit `7d49e6c7e2` (CUTLASS v3.5.0, April 2024). **Verified pre-merge: our `cutlass-patches/sm37-trait.patch` applies cleanly to that bundled CUTLASS as-is** — the `arch.h` structure at the patch site is stable across CUTLASS v3.5.0 → v4.0.0 → HEAD. Story #33's CUTLASS-side work is therefore: apply the existing patch to the submodule, no separate version is needed.
 
 **Applies to:** XFormers v0.0.28.post3.
 
