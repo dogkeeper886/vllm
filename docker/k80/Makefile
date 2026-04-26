@@ -24,7 +24,7 @@ VLLM_BRANCH    ?= main
 VLLM_LOG_DIR   ?= /tmp/vllm-logs
 REPO_ROOT      := $(shell git rev-parse --show-toplevel 2>/dev/null || echo ../..)
 
-.PHONY: help build-builder build-runtime build-local build-local-no-cache build build-all-local log-dir run stop logs clean verify-cutlass-patches
+.PHONY: help build-builder build-runtime build-local build-local-no-cache build build-all-local log-dir run stop logs clean verify-cutlass-patches verify-xformers-patches
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -110,3 +110,27 @@ verify-cutlass-patches: ## Verify cutlass-patches/*.patch apply cleanly to the p
 	    fi; \
 	done; \
 	echo "all patches apply cleanly to CUTLASS $(CUTLASS_PIN_TAG)"
+
+# XFormers pin — must stay on v0.0.28.post3 because v0.0.29+ removed the
+# cutlass mem-eff backend (commit 3d947a6). See xformers-patches/README.md
+# for the version-rationale detail.
+XFORMERS_PIN_TAG ?= v0.0.28.post3
+XFORMERS_PIN_REPO ?= https://github.com/facebookresearch/xformers.git
+
+verify-xformers-patches: ## Verify xformers-patches/*.patch apply cleanly to the pinned XFormers
+	@set -e; \
+	WORK=$$(mktemp -d); \
+	trap "rm -rf $$WORK" EXIT; \
+	echo "fetching XFormers $(XFORMERS_PIN_TAG)..."; \
+	git clone --depth 1 --branch $(XFORMERS_PIN_TAG) $(XFORMERS_PIN_REPO) $$WORK/xformers >/dev/null; \
+	echo "checking patches against $(XFORMERS_PIN_TAG):"; \
+	for p in xformers-patches/*.patch; do \
+	    [ -f "$$p" ] || continue; \
+	    if git -C $$WORK/xformers apply --check "$(REPO_ROOT)/docker/k80/$$p" 2>/dev/null; then \
+	        echo "  ✓ $$p"; \
+	    else \
+	        echo "  ✗ $$p — does not apply cleanly to $(XFORMERS_PIN_TAG)"; \
+	        exit 1; \
+	    fi; \
+	done; \
+	echo "all patches apply cleanly to XFormers $(XFORMERS_PIN_TAG)"

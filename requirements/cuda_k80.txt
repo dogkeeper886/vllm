@@ -33,3 +33,22 @@ ray>=2.9.0
 #
 # See docker/k80/cutlass-patches/README.md for the pin-bump workflow when
 # upstream CUTLASS or vLLM's FetchContent revision moves.
+#
+# XFormers — must stay pinned at v0.0.28.post3. After v0.0.29, upstream
+# removed the cutlass mem-eff attention backend ("now embedded in PyTorch").
+# Our K80 fork uses PyTorch 2.0.1, which predates that move — so XFormers
+# HEAD has nothing for our build to consume. v0.0.28.post3 (2024-10-30) is
+# the last tag with the cutlass kernels in-tree.
+#
+# Patches at:
+#   docker/k80/xformers-patches/
+#
+# Currently applied:
+#   sm37-generate-kernels.patch  — adds 37 to xformers' SM kernel-autogen
+#                                  list (Story #31). Companion to the
+#                                  CUTLASS Sm37 trait above.
+#
+# Verify patches apply cleanly to the pinned version:
+#   make -C docker/k80 verify-xformers-patches
+#
+# See docker/k80/xformers-patches/README.md for the pin rationale.
