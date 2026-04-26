@@ -62,7 +62,8 @@ def main():
     # Imports (after CUDA is up; xformers may probe device on import)
     import xformers
     import xformers.ops
-    import xformers.ops.fmha as fmha
+    from xformers.ops.fmha import memory_efficient_attention_forward
+    from xformers.ops.fmha.common import Inputs
     print(f"xformers     : {xformers.__version__}")
     print(f"location     : {xformers.__file__}")
 
@@ -85,14 +86,24 @@ def main():
     # Reference, in fp32 on the same device.
     out_ref = reference_attention(q, k, v)
 
-    # Force the cutlass op (not flash, not triton — those gates require
-    # sm_70+/sm_80+ and would either fail or fall through to other backends).
-    op = (CutlassFwOp, None)  # (forward_op, backward_op)
+    # Pre-flight: confirm cutlassF supports() returns True for these inputs.
+    # If False here, the dispatcher would skip to a different op or raise.
+    inp = Inputs(query=q, key=k, value=v, attn_bias=None, p=0.0, scale=None)
+    supports_reason = CutlassFwOp.not_supported_reasons(inp)
+    if supports_reason:
+        print(f"FAIL: cutlass.FwOp does not support these inputs: {supports_reason}")
+        return 3
+    print(f"cutlass FwOp.supports(inputs) = True")
 
+    # Use the forward-only API to surgically dispatch through cutlassF —
+    # explicit, no ambiguity about backward op resolution. This is the
+    # correct form per xformers v0.0.23 ops/fmha/__init__.py:
+    #     def memory_efficient_attention_forward(..., op: Optional[Type[AttentionFwOpBase]])
     try:
-        out_xfm = xformers.ops.memory_efficient_attention(q, k, v, op=op)
+        out_xfm = memory_efficient_attention_forward(q, k, v, op=CutlassFwOp)
     except Exception as e:
-        print(f"FAIL: memory_efficient_attention raised: {type(e).__name__}: {e}")
+        print(f"FAIL: memory_efficient_attention_forward raised: "
+              f"{type(e).__name__}: {e}")
         return 3
 
     # Sanity check shape
