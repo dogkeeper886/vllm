@@ -158,6 +158,11 @@ echo ""
 # Step 4: verify
 # -----------------------------------------------------------------------------
 echo "=== Step 4: verify installation ==="
+# IMPORTANT: cd OUT of the xformers source directory before importing.
+# Python's sys.path puts the CWD first; if we stay in /tmp/.../xformers, the
+# source package (no _C.so) shadows the installed one. cd to /tmp to use
+# normal site-packages resolution.
+cd /tmp
 python <<'PYEOF'
 import sys
 import xformers
