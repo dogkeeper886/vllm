@@ -98,7 +98,7 @@ verify-cutlass-patches: ## Verify cutlass-patches/*.patch apply cleanly to the p
 	WORK=$$(mktemp -d); \
 	trap "rm -rf $$WORK" EXIT; \
 	echo "fetching CUTLASS $(CUTLASS_PIN_TAG)..."; \
-	git clone --depth 1 --branch $(CUTLASS_PIN_TAG) $(CUTLASS_PIN_REPO) $$WORK/cutlass >/dev/null 2>&1; \
+	git clone --depth 1 --branch $(CUTLASS_PIN_TAG) $(CUTLASS_PIN_REPO) $$WORK/cutlass >/dev/null; \
 	echo "checking patches against $(CUTLASS_PIN_TAG):"; \
 	for p in cutlass-patches/*.patch; do \
 	    [ -f "$$p" ] || continue; \

@@ -125,13 +125,22 @@ git diff > /path/to/vllm/docker/k80/cutlass-patches/<name>.patch
 
 ### Scenario B — upstream CUTLASS adds Sm37 natively
 
-If NVIDIA upstream adds `cutlass::arch::Sm37` themselves (unlikely but worth handling): drop the corresponding patches. After the upstream bump:
+If NVIDIA upstream adds `cutlass::arch::Sm37` themselves (unlikely but worth handling): drop the corresponding patches.
+
+Detection: `git apply --check` will fail (the lines our patch wants to add are already there), but `git apply --check --reverse` will succeed (reversing the patch finds matching content to remove). That asymmetry means the upstream content already matches our patch's RHS — i.e., upstream now has the Sm37 struct.
 
 ```bash
-make -C docker/k80 verify-cutlass-patches
-# If `git apply` rejects sm37-trait.patch with "patch already applied" reverse,
-# the upstream now has the Sm37 struct. Delete sm37-trait.patch and update
-# this README to remove its entry.
+# Detect:
+WORK=$(mktemp -d); trap "rm -rf $WORK" EXIT
+git clone --depth 1 --branch v4.0.0 https://github.com/NVIDIA/cutlass.git $WORK/cutlass
+git -C $WORK/cutlass apply --check        docker/k80/cutlass-patches/sm37-trait.patch || \
+    git -C $WORK/cutlass apply --check --reverse docker/k80/cutlass-patches/sm37-trait.patch \
+    && echo "Sm37 already present upstream — drop the patch"
+
+# Recover:
+rm docker/k80/cutlass-patches/sm37-trait.patch
+# Update this README to remove the patch's entry from the "Patches" section.
+# Bump this README to note the upstream version that introduced Sm37 natively.
 ```
 
 ### Scenario C — upstream changes `mma_simt.h:113` "Hard-coded for now"
