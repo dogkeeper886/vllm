@@ -1,0 +1,114 @@
+name: K80 CUTLASS sm_37 Reproducer
+
+# Story #28 (Phase 1 of epic #12) — compile docker/k80/cutlass-repro/sgemm_sm37.cu
+# inside the K80 builder image, run the resulting binary on a single K80 die,
+# and capture the output as a CI artifact.
+#
+# Single-die TP=1-equivalent compute. No NCCL, no multi-die. Falls under
+# the "always fine" category in the hardware-risky-ops timing rule —
+# compute is bounded to ~1 MB VRAM, no power-cap experiments.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: k80-hardware
+  cancel-in-progress: false
+
+jobs:
+  repro:
+    name: Compile + run sgemm_sm37
+    runs-on: [self-hosted, vllm]
+    env:
+      ARTIFACT_DIR: /tmp/k80-cutlass-repro-logs
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify builder image is present
+        run: |
+          if ! docker image inspect vllm37-builder:latest >/dev/null 2>&1; then
+            echo "::error::vllm37-builder:latest not found. Run k80-build.yml first, or pull dogkeeper886/vllm37-builder."
+            exit 1
+          fi
+          docker image inspect vllm37-builder:latest \
+            --format 'builder: {{.RepoTags}} size {{.Size}} bytes'
+
+      - name: Prepare artifact directory
+        run: |
+          mkdir -p "$ARTIFACT_DIR"
+          chmod 777 "$ARTIFACT_DIR"
+
+      - name: Compile sgemm_sm37 inside builder image
+        run: |
+          # Mount the cutlass-repro and cutlass-patches dirs into the builder.
+          # The build script clones CUTLASS into /tmp/cutlass-sm37-build,
+          # applies the patches, and compiles. Output binary lands in
+          # /tmp/cutlass-sm37-build/build/sgemm_sm37 inside the container —
+          # we copy it to $ARTIFACT_DIR via a second `docker cp` step rather
+          # than carrying state across docker run invocations.
+          docker run --rm \
+            -v "${{ github.workspace }}/docker/k80/cutlass-repro:/repro:ro" \
+            -v "${{ github.workspace }}/docker/k80/cutlass-patches:/patches:ro" \
+            -v "$ARTIFACT_DIR:/out" \
+            vllm37-builder:latest \
+            bash -c '
+              set -euo pipefail
+              cd /repro
+              PATCH_DIR=/patches WORK_DIR=/tmp/cutlass-sm37-build ./build.sh 2>&1 | tee /out/build.log
+              cp /tmp/cutlass-sm37-build/build/sgemm_sm37 /out/sgemm_sm37
+              ls -la /out/
+            '
+          ls -la "$ARTIFACT_DIR"
+
+      - name: Run sgemm_sm37 on K80 hardware
+        id: run
+        run: |
+          # Run the compiled binary inside the builder image (which has the
+          # right libstdc++ / CUDA runtime). Pass the K80 GPU through.
+          #
+          # `timeout 60` bounds the kernel-wedge failure mode — Story 0.5 §3.7
+          # surfaced "no kernel image is available" hangs as a known K80 risk
+          # on builds that compile cleanly. The binary itself completes in
+          # <1s on this hardware, so 60s is generous.
+          #
+          # Capture the binary's exit code explicitly (don't pipe to tee —
+          # that would mask the binary's exit via the pipeline). We redirect
+          # to run.log inside the container, then `cat` it before exiting
+          # with the saved code so the GH log still shows the output.
+          #
+          # `|| docker_exit=$?` suspends `set -e` so we can inspect the code
+          # without the step aborting before we read it.
+          docker_exit=0
+          docker run --rm \
+            --runtime=nvidia --gpus all \
+            -v "$ARTIFACT_DIR:/out" \
+            vllm37-builder:latest \
+            bash -c 'timeout 60 /out/sgemm_sm37 > /out/run.log 2>&1; rc=$?; cat /out/run.log; exit $rc' \
+            || docker_exit=$?
+
+          # Defense-in-depth: the binary's exit code is the load-bearing
+          # signal, but also grep for the PASS line with a loose regex so
+          # the check survives minor output-format drift in the .cu file.
+          if [ "$docker_exit" -eq 0 ] \
+            && grep -qE "^RESULT.*PASS\b" "$ARTIFACT_DIR/run.log"; then
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+            echo "::error::sgemm_sm37 did not pass (binary exit=$docker_exit)"
+            tail -50 "$ARTIFACT_DIR/run.log" || true
+            exit 1
+          fi
+
+      - name: Capture nvidia-smi state
+        if: always()
+        run: |
+          nvidia-smi 2>&1 | tee "$ARTIFACT_DIR/nvidia-smi.log" || true
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k80-cutlass-repro
+          path: ${{ env.ARTIFACT_DIR }}/
