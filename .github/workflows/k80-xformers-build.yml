@@ -80,7 +80,58 @@ jobs:
             exit 1
           fi
 
-      - name: Capture nvidia-smi state (post-build, no GPU work expected)
+      - name: Run cutlassF fp32 smoke test on K80 (Story #34)
+        id: smoke
+        run: |
+          # Story #34 — first time XFormers kernels touch the K80 GPU.
+          # The previous step's `pip install xformers` lands inside an
+          # ephemeral container that already exited. Re-run the same image
+          # with --gpus all and re-build inside; the build is idempotent
+          # (clones cache, patches re-apply via git apply -3 fallback), and
+          # the resulting wheel reinstalls in seconds because pip's wheel
+          # cache is on the host (mount carried via the artifact dir
+          # pattern would help here, but for now we accept the rebuild).
+          #
+          # Actually simpler: do the build AND the test in the same docker
+          # run so the install is live for the test. Below.
+          docker_exit=0
+          docker run --rm \
+            --runtime=nvidia --gpus all \
+            -v "${{ github.workspace }}/docker/k80/xformers-build:/build:ro" \
+            -v "${{ github.workspace }}/docker/k80/xformers-patches:/xfmr-patches:ro" \
+            -v "${{ github.workspace }}/docker/k80/cutlass-patches:/cutlass-patches:ro" \
+            -v "$ARTIFACT_DIR:/out" \
+            vllm37-builder:latest \
+            bash -c '
+              set -e
+              # Re-apply patches and re-install xformers in this container,
+              # then run the smoke test. WORK_DIR persistence inside the
+              # builder image is not guaranteed; redo from scratch.
+              PATCH_DIR=/xfmr-patches \
+              CUTLASS_PATCH_DIR=/cutlass-patches \
+              WORK_DIR=/tmp/xformers-sm37-build \
+              /build/build.sh > /out/smoke-build.log 2>&1
+              # Now run the smoke test on GPU.
+              cd /tmp
+              timeout 120 python /build/test_cutlass_fp32.py > /out/smoke-run.log 2>&1
+              rc=$?
+              cat /out/smoke-run.log
+              exit $rc
+            ' || docker_exit=$?
+
+          if [ "$docker_exit" -eq 0 ] \
+            && grep -qE "^RESULT.*PASS\b" "$ARTIFACT_DIR/smoke-run.log"; then
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+            echo "::notice::cutlassF fp32 smoke test passed on K80"
+          else
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+            echo "::error::smoke test did not pass (docker exit=$docker_exit)"
+            echo "Last 80 lines of smoke-run.log:"
+            tail -80 "$ARTIFACT_DIR/smoke-run.log" || true
+            exit 1
+          fi
+
+      - name: Capture nvidia-smi state (post-smoke)
         if: always()
         run: |
           nvidia-smi 2>&1 | tee "$ARTIFACT_DIR/nvidia-smi.log" || true

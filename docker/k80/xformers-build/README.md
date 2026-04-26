@@ -23,7 +23,8 @@ When the workflow runs green:
 
 | File | Purpose |
 |---|---|
-| `build.sh` | Clones XFormers v0.0.23 (with submodules), applies our XFormers + CUTLASS patches, builds + installs via `pip install`, verifies. |
+| `build.sh` | Clones XFormers v0.0.23 (with submodules), applies our XFormers + CUTLASS patches, builds + installs via `pip install`, verifies the import. |
+| `test_cutlass_fp32.py` | Story #34 — runtime smoke test. Calls `xformers.ops.memory_efficient_attention` with fp32 inputs forced through `cutlass.FwOp` on K80, compares element-wise against a manual softmax(QK^T)V reference. |
 | `README.md` | This file. |
 
 ## Running it
@@ -66,9 +67,9 @@ RESULT: PASS — xformers built and imports cleanly
 
 ## What this does NOT do
 
-- **Does not run an attention op on K80 hardware.** The build doesn't touch the GPU; verification is install-time only. **Story [#34][s34] runs XFormers' own test suite on the K80 die** to prove the kernels actually execute.
 - **Does not integrate with vLLM's main build.** Story [#41][s41] (Phase 4) wires XFormers into vLLM's backend dispatcher.
 - **Does not benchmark.** Story 5.x.
+- **Does not run XFormers' full pytest suite.** The smoke test (`test_cutlass_fp32.py`, Story #34) is a hand-rolled minimal proof. Running `xformers/tests/test_mem_eff_attention.py` end-to-end is plausible additional coverage but typically reports many skips for fp16/bf16/sm_70+ paths that don't apply on K80; treat as informational if it ever lands.
 
 [s34]: https://github.com/dogkeeper886/vllm/issues/34
 [s41]: https://github.com/dogkeeper886/vllm/issues/41
