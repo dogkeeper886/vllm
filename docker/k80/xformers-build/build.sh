@@ -120,7 +120,11 @@ echo ""
 echo "=== Step 2c: regenerate autogen kernels (with sm_37) ==="
 cd "${WORK_DIR}/xformers"
 python xformers/csrc/attention/cuda/fmha/generate_kernels.py
-sm37_count=$(grep -rE "Sm37|sm37" xformers/csrc/attention/cuda/fmha/autogen/ 2>/dev/null | wc -l)
+# `|| sm37_count=0` defends against `set -o pipefail` — if grep finds zero
+# matches it exits 1, which would otherwise propagate through the pipeline,
+# trip set -e on the assignment, and abort the script before the if-check
+# runs. We want the explicit "expected ≥50" diagnostic to fire instead.
+sm37_count=$(grep -rE "Sm37|sm37" xformers/csrc/attention/cuda/fmha/autogen/ 2>/dev/null | wc -l) || sm37_count=0
 echo "regenerated autogen files contain ${sm37_count} sm_37 references"
 if [ "${sm37_count}" -lt 50 ]; then
     echo "ERROR: expected ≥50 sm_37 references after autogen; got ${sm37_count}"
