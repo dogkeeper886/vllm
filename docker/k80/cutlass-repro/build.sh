@@ -20,7 +20,10 @@
 set -euo pipefail
 
 REPRO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PATCH_DIR="${REPRO_DIR}/../cutlass-patches"
+# All env vars below respect caller-supplied overrides (`:-` defaulting).
+# This matters because the k80-cutlass-repro workflow mounts the patches dir
+# at /patches inside the container, NOT at $REPRO_DIR/../cutlass-patches.
+PATCH_DIR="${PATCH_DIR:-${REPRO_DIR}/../cutlass-patches}"
 WORK_DIR="${WORK_DIR:-/tmp/cutlass-sm37-build}"
 CUTLASS_TAG="${CUTLASS_TAG:-v4.0.0}"
 CUTLASS_REPO="${CUTLASS_REPO:-https://github.com/NVIDIA/cutlass.git}"
@@ -50,11 +53,28 @@ fi
 echo ""
 
 echo "=== Step 2: apply sm_37 patches ==="
+# Defensive check: PATCH_DIR must exist and contain at least one .patch.
+# Previously this loop silently iterated over an empty glob if PATCH_DIR
+# was wrong, leaving an unpatched tree to fail later with a confusing
+# "Sm37 struct not present" message. Better to fail loudly here.
+if [ ! -d "${PATCH_DIR}" ]; then
+    echo "ERROR: PATCH_DIR does not exist: ${PATCH_DIR}"
+    exit 1
+fi
+shopt -s nullglob
+patch_files=( "${PATCH_DIR}"/*.patch )
+shopt -u nullglob
+if [ ${#patch_files[@]} -eq 0 ]; then
+    echo "ERROR: no .patch files found in ${PATCH_DIR}"
+    exit 1
+fi
+echo "found ${#patch_files[@]} patch(es) in ${PATCH_DIR}:"
+for p in "${patch_files[@]}"; do echo "  - $(basename "$p")"; done
+
 # Use `git apply -3` for 3-way merge — handles already-applied AND minor
 # context drift if upstream CUTLASS adds nearby content. README §
 # "Idempotency" documents the rationale.
-for patch_file in "${PATCH_DIR}"/*.patch; do
-    [ -f "${patch_file}" ] || continue
+for patch_file in "${patch_files[@]}"; do
     patch_name="$(basename "${patch_file}")"
     echo "applying ${patch_name}..."
     git -C "${WORK_DIR}/cutlass" apply -3 "${patch_file}" \
