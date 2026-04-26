@@ -67,18 +67,36 @@ jobs:
         run: |
           # Run the compiled binary inside the builder image (which has the
           # right libstdc++ / CUDA runtime). Pass the K80 GPU through.
+          #
+          # `timeout 60` bounds the kernel-wedge failure mode — Story 0.5 §3.7
+          # surfaced "no kernel image is available" hangs as a known K80 risk
+          # on builds that compile cleanly. The binary itself completes in
+          # <1s on this hardware, so 60s is generous.
+          #
+          # Capture the binary's exit code explicitly (don't pipe to tee —
+          # that would mask the binary's exit via the pipeline). We redirect
+          # to run.log inside the container, then `cat` it before exiting
+          # with the saved code so the GH log still shows the output.
+          #
+          # `|| docker_exit=$?` suspends `set -e` so we can inspect the code
+          # without the step aborting before we read it.
+          docker_exit=0
           docker run --rm \
             --runtime=nvidia --gpus all \
             -v "$ARTIFACT_DIR:/out" \
             vllm37-builder:latest \
-            bash -c '/out/sgemm_sm37 2>&1 | tee /out/run.log'
+            bash -c 'timeout 60 /out/sgemm_sm37 > /out/run.log 2>&1; rc=$?; cat /out/run.log; exit $rc' \
+            || docker_exit=$?
 
-          # Capture exit code via tee+test on the run.log result line
-          if grep -q "RESULT       : PASS" "$ARTIFACT_DIR/run.log"; then
+          # Defense-in-depth: the binary's exit code is the load-bearing
+          # signal, but also grep for the PASS line with a loose regex so
+          # the check survives minor output-format drift in the .cu file.
+          if [ "$docker_exit" -eq 0 ] \
+            && grep -qE "^RESULT.*PASS\b" "$ARTIFACT_DIR/run.log"; then
             echo "result=pass" >> "$GITHUB_OUTPUT"
           else
             echo "result=fail" >> "$GITHUB_OUTPUT"
-            echo "::error::sgemm_sm37 did not report PASS"
+            echo "::error::sgemm_sm37 did not pass (binary exit=$docker_exit)"
             tail -50 "$ARTIFACT_DIR/run.log" || true
             exit 1
           fi
