@@ -19,7 +19,12 @@ services:
       - ${VLLM_LOG_DIR:-/tmp/vllm-logs}:/var/log/vllm
     environment:
       - VLLM_USE_V1=0
-      - VLLM_ATTENTION_BACKEND=TORCH_SDPA
+      # Phase 2 Story #35: prefer patched XFormers cutlassF on K80. The
+      # vllm/platforms/cuda.py:368 gate now picks XFormers when xformers is
+      # importable on sm < 60 (which it is — built into vllm37-local image
+      # by docker/k80/runtime/Dockerfile.local). Falls back to TORCH_SDPA
+      # automatically if xformers isn't importable.
+      - VLLM_ATTENTION_BACKEND=XFORMERS
       - NCCL_DEBUG=INFO
       # NCCL writes to this file per host and per PID (%h / %p are NCCL
       # substitutions). Keeps NCCL output separate from vLLM's stdout so a
