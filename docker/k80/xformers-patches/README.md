@@ -21,6 +21,29 @@ Same reasoning as `cutlass-patches/`: minimal additive changes are smaller than 
 
 ## Patches
 
+### `sm37-cc-gate.patch` (Story #32)
+
+Lowers XFormers' Python-level minimum compute capability gate at `xformers/ops/fmha/common.py:304`:
+
+```python
+# Before:
+CUDA_MINIMUM_COMPUTE_CAPABILITY: Tuple[int, int] = (5, 0)
+
+# After:
+CUDA_MINIMUM_COMPUTE_CAPABILITY: Tuple[int, int] = (3, 7)  # Tesla K80 (sm_37); lowered from upstream (5, 0)
+```
+
+**Why:** Per Story 0.2 §3.1's analysis of the dispatcher, the runtime check at `common.py:373` uses this value to reject devices below the threshold. With the default `(5, 0)`, an sm_37 device is refused at dispatch time before any kernel is selected — even if `sm37-generate-kernels.patch` produced kernels for it. Both patches are required for a working dispatch chain.
+
+**What this unlocks:** When Story #33 builds and Story #34 runs, `AttentionOpBase.supports()` will accept an sm_37 device instead of refusing it. Per the same Story 0.2 analysis, individual ops can override `CUDA_MINIMUM_COMPUTE_CAPABILITY` upward (e.g. `flash.py` sets `(8, 0)`); those overrides aren't touched by this patch — the gate only loosens for ops that inherit the base.
+
+**What this does NOT do:**
+
+- Does not by itself produce a working sm_37 XFormers binary. That's Story #33.
+- Does not lower the threshold for ops that override it (Flash, Triton, decoder-specific ops). Those ops require sm_70+/sm_80+ for hardware reasons (tensor cores, etc.) that are real, not labelling artifacts. We don't want them to dispatch on K80 — they would crash at kernel launch. The base `cutlassF` op is what we're after, and it inherits the base default we just lowered.
+
+**Applies to:** XFormers v0.0.28.post3.
+
 ### `sm37-generate-kernels.patch` (Story #31)
 
 Adds `37` to the SM list at `xformers/csrc/attention/cuda/fmha/generate_kernels.py:23`:
