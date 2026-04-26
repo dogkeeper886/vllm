@@ -18,8 +18,9 @@ Minimal CUTLASS GEMM that dispatches through `cutlass::arch::Sm37` (the tag adde
 
 | File | Purpose |
 |---|---|
-| `sgemm_sm37.cu` | The reproducer — uses `cutlass::gemm::device::Gemm<..., arch::Sm37>` to compute a small SGEMM, then verifies output element-wise. ~150 lines. |
-| `build.sh` | Pulls CUTLASS at `v4.0.0` (matches our `FetchContent` pin), applies `docker/k80/cutlass-patches/*.patch`, then compiles `sgemm_sm37.cu` with NVCC targeting `sm_37`. Runs inside the K80 builder image. |
+| `sgemm_sm37.cu` | Story #28 — minimal reproducer using `cutlass::gemm::device::Gemm<..., arch::Sm37>` to compute a 256×256×256 SGEMM with deterministic ones-and-ones input, verifies output element-wise against expected `K`. |
+| `sgemm_sm37_vs_cublas.cu` | Story #29 — same CUTLASS path vs cuBLAS reference. Five sizes (64²–1024²), randomized inputs, reports max abs / max rel / mean abs error per size. Tolerance: max relative error ≤ 1e-3 across all sizes. |
+| `build.sh` | Pulls CUTLASS at `v4.0.0` (matches our `FetchContent` pin), applies `docker/k80/cutlass-patches/*.patch`, then compiles both binaries with NVCC targeting `sm_37`. Runs inside the K80 builder image. The cuBLAS comparison binary additionally links `-lcublas`. |
 | `README.md` | This file. |
 
 ## Running it
@@ -48,6 +49,8 @@ docker run --rm --runtime=nvidia --gpus all \
 
 ### What success looks like
 
+**Story #28 — `sgemm_sm37`:**
+
 ```
 === Story #28 — CUTLASS sm_37 SGEMM reproducer ===
 device       : Tesla K80 (cc 3.7)
@@ -55,20 +58,40 @@ problem      : 256 x 256 x 256 (M x N x K), fp32, SIMT
 expected     : 256 per element
 got D[0]     : 256
 max abs err  : 0.000000e+00
-tolerance    : 0.001
+tolerance    : 1.000000e-03
 errors       : 0 / 65536
 RESULT       : PASS
 ```
 
-Exit code 0 = pass. Non-zero = either CUDA runtime failure (exit 2), CUTLASS dispatch failure (exit 3), or numerical disagreement (exit 1).
+Verified bit-exact on K80 hardware via [run 24946197232][run-28].
+
+**Story #29 — `sgemm_sm37_vs_cublas`:**
+
+```
+=== Story #29 — CUTLASS Sm37 vs cuBLAS SGEMM ===
+device       : Tesla K80 (cc 3.7)
+
+--- M=64 N=64 K=64 ---
+  max abs error : <small>
+  max rel error : <small>  (tolerance 1.000e-03)
+  ...
+--- M=1024 N=1024 K=1024 ---
+  ...
+=== Summary ===
+passed: 5/5
+RESULT       : PASS
+```
+
+Exit code 0 = pass. Non-zero = either CUDA runtime failure (exit 2), CUTLASS dispatch failure (exit 3), or numerical disagreement / tolerance violation (exit 1).
+
+[run-28]: https://github.com/dogkeeper886/vllm/actions/runs/24946197232
 
 ## What this does NOT do
 
-- **Does not benchmark.** Numerical correctness only. Story [#29][story29] adds cuBLAS comparison + tolerance characterisation. Story 5.x covers performance.
+- **Does not benchmark.** Numerical correctness only. Story 5.x covers performance.
 - **Does not patch the vLLM build.** Current vLLM K80 build still uses `VLLM_BUILD_LEGACY_CUDA=ON` (`CMakeLists.txt:273`) to skip CUTLASS. This reproducer is standalone — it proves the kernel path works in isolation. Story [#30][story30] handles the build-graph integration.
 - **Does not exercise the FA-style attention algorithm.** Just GEMM. Story 3.x will do attention-shaped work after Phase 1 closes.
 
-[story29]: https://github.com/dogkeeper886/vllm/issues/29
 [story30]: https://github.com/dogkeeper886/vllm/issues/30
 
 ## Hardware safety notes

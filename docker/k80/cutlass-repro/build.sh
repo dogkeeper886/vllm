@@ -86,7 +86,7 @@ grep -A1 "^struct Sm37" "${WORK_DIR}/cutlass/include/cutlass/arch/arch.h" \
     || { echo "ERROR: Sm37 struct not present after patching"; exit 1; }
 echo ""
 
-echo "=== Step 3: compile sgemm_sm37.cu for ${TARGET_ARCH} ==="
+echo "=== Step 3a: compile sgemm_sm37.cu for ${TARGET_ARCH} ==="
 mkdir -p "${WORK_DIR}/build"
 "${NVCC}" \
     -std=c++17 \
@@ -95,13 +95,28 @@ mkdir -p "${WORK_DIR}/build"
     -I "${WORK_DIR}/cutlass/include" \
     -I "${WORK_DIR}/cutlass/tools/util/include" \
     -Xcompiler -Wall \
-    -DCUTLASS_NVCC_ARCHS="37" \
     "${REPRO_DIR}/sgemm_sm37.cu" \
     -o "${WORK_DIR}/build/sgemm_sm37"
-
 ls -la "${WORK_DIR}/build/sgemm_sm37"
 echo ""
 
+echo "=== Step 3b: compile sgemm_sm37_vs_cublas.cu for ${TARGET_ARCH} ==="
+# Story #29 — same SGEMM via CUTLASS Sm37 and cuBLAS, compared element-wise.
+# Needs -lcublas at link time.
+"${NVCC}" \
+    -std=c++17 \
+    -O3 \
+    -arch="${TARGET_ARCH}" \
+    -I "${WORK_DIR}/cutlass/include" \
+    -I "${WORK_DIR}/cutlass/tools/util/include" \
+    -Xcompiler -Wall \
+    "${REPRO_DIR}/sgemm_sm37_vs_cublas.cu" \
+    -lcublas \
+    -o "${WORK_DIR}/build/sgemm_sm37_vs_cublas"
+ls -la "${WORK_DIR}/build/sgemm_sm37_vs_cublas"
+echo ""
+
 echo "=== Build complete ==="
-echo "binary: ${WORK_DIR}/build/sgemm_sm37"
-echo "to run: ${WORK_DIR}/build/sgemm_sm37"
+echo "binaries:"
+echo "  - ${WORK_DIR}/build/sgemm_sm37"
+echo "  - ${WORK_DIR}/build/sgemm_sm37_vs_cublas"
