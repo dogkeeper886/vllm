@@ -24,7 +24,7 @@ VLLM_BRANCH    ?= main
 VLLM_LOG_DIR   ?= /tmp/vllm-logs
 REPO_ROOT      := $(shell git rev-parse --show-toplevel 2>/dev/null || echo ../..)
 
-.PHONY: help build-builder build-runtime build-local build-local-no-cache build build-all-local log-dir run stop logs clean
+.PHONY: help build-builder build-runtime build-local build-local-no-cache build build-all-local log-dir run stop logs clean verify-cutlass-patches
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -87,3 +87,26 @@ logs: ## Show vLLM server logs
 clean: ## Remove builder and runtime images
 	-docker rmi $(RUNTIME_IMAGE) $(RUNTIME_LOCAL) $(BUILDER_IMAGE) 2>/dev/null
 	@echo "Cleaned up images."
+
+# CUTLASS revision pinned by CMakeLists.txt:302 — keep these in sync if upstream
+# vLLM bumps the FetchContent revision.
+CUTLASS_PIN_TAG ?= v4.0.0
+CUTLASS_PIN_REPO ?= https://github.com/NVIDIA/cutlass.git
+
+verify-cutlass-patches: ## Verify cutlass-patches/*.patch apply cleanly to the pinned CUTLASS
+	@set -e; \
+	WORK=$$(mktemp -d); \
+	trap "rm -rf $$WORK" EXIT; \
+	echo "fetching CUTLASS $(CUTLASS_PIN_TAG)..."; \
+	git clone --depth 1 --branch $(CUTLASS_PIN_TAG) $(CUTLASS_PIN_REPO) $$WORK/cutlass >/dev/null 2>&1; \
+	echo "checking patches against $(CUTLASS_PIN_TAG):"; \
+	for p in cutlass-patches/*.patch; do \
+	    [ -f "$$p" ] || continue; \
+	    if git -C $$WORK/cutlass apply --check "$(REPO_ROOT)/docker/k80/$$p" 2>/dev/null; then \
+	        echo "  ✓ $$p"; \
+	    else \
+	        echo "  ✗ $$p — does not apply cleanly to $(CUTLASS_PIN_TAG)"; \
+	        exit 1; \
+	    fi; \
+	done; \
+	echo "all patches apply cleanly to CUTLASS $(CUTLASS_PIN_TAG)"
