@@ -96,8 +96,74 @@ When future stories add patches:
 - Add a section to this README describing what the patch does, why, and what it does *not* do.
 - Patches should be additive whenever possible. Removing or modifying upstream code is allowed but should be explicitly justified.
 
+## Pin maintenance — when CUTLASS or vLLM bumps
+
+The CUTLASS pin lives at `CMakeLists.txt:302`:
+
+```cmake
+set(CUTLASS_REVISION "v4.0.0" CACHE STRING "CUTLASS revision to use")
+```
+
+Three scenarios that require maintenance work here:
+
+### Scenario A — upstream vLLM bumps the FetchContent revision
+
+If a future merge from `vllm-project/vllm` lands a new CUTLASS revision (e.g. `v4.1.0`), our patches need to be re-validated against it.
+
+```bash
+# Verify all patches still apply to the new pin.
+make -C docker/k80 verify-cutlass-patches CUTLASS_PIN_TAG=v4.1.0
+
+# If clean: bump CUTLASS_PIN_TAG default in docker/k80/Makefile to match.
+# If broken: regenerate the affected patches against the new tag:
+cd /tmp
+git clone --depth 1 --branch v4.1.0 https://github.com/NVIDIA/cutlass.git
+cd cutlass
+# … re-apply the conceptual change manually …
+git diff > /path/to/vllm/docker/k80/cutlass-patches/<name>.patch
+```
+
+### Scenario B — upstream CUTLASS adds Sm37 natively
+
+If NVIDIA upstream adds `cutlass::arch::Sm37` themselves (unlikely but worth handling): drop the corresponding patches.
+
+Detection: `git apply --check` will fail (the lines our patch wants to add are already there), but `git apply --check --reverse` will succeed (reversing the patch finds matching content to remove). That asymmetry means the upstream content already matches our patch's RHS — i.e., upstream now has the Sm37 struct.
+
+```bash
+# Detect:
+WORK=$(mktemp -d); trap "rm -rf $WORK" EXIT
+git clone --depth 1 --branch v4.0.0 https://github.com/NVIDIA/cutlass.git $WORK/cutlass
+git -C $WORK/cutlass apply --check        docker/k80/cutlass-patches/sm37-trait.patch || \
+    git -C $WORK/cutlass apply --check --reverse docker/k80/cutlass-patches/sm37-trait.patch \
+    && echo "Sm37 already present upstream — drop the patch"
+
+# Recover:
+rm docker/k80/cutlass-patches/sm37-trait.patch
+# Update this README to remove the patch's entry from the "Patches" section.
+# Bump this README to note the upstream version that introduced Sm37 natively.
+```
+
+### Scenario C — upstream changes `mma_simt.h:113` "Hard-coded for now"
+
+Story 0.1 §9 risk 2 flagged that `include/cutlass/gemm/warp/mma_simt.h:113` has the comment `// Hard-coded for now` above `using ArchTag = arch::Sm50;`. If upstream parameterizes that `ArchTag`, our optimistic dispatch story (Story 0.1 §4.2's "Sm37 routes through SIMT via `!is_same<ArchTag, Sm80>`") may need re-validation.
+
+```bash
+# After CUTLASS bump, sanity-check the gate is still in place:
+git -C /tmp/cutlass grep -n "Hard-coded for now" include/cutlass/gemm/warp/mma_simt.h
+git -C /tmp/cutlass grep -n "is_same<ArchTag, arch::Sm80>" include/cutlass/gemm/kernel/default_gemm.h
+
+# If either disappears: re-run the Story #28/#29 reproducer workflow on K80
+# (k80-cutlass-repro.yml) to confirm the new dispatch still routes Sm37
+# through SIMT correctly. Bit-exact result vs cuBLAS is the regression test.
+```
+
+### Verifying the current pin
+
+`make -C docker/k80 verify-cutlass-patches` is fast (clones shallow, dry-run patch check) and zero-hardware. Run it before opening any PR that touches `cutlass-patches/` or bumps the pin.
+
 ## See also
 
 - [`docs/port/cutlass-arch-system.md`](../../../docs/port/cutlass-arch-system.md) — Story 0.1's CUTLASS dispatch analysis (the why behind these patches).
 - [`docs/port/kepler-vs-maxwell.md`](../../../docs/port/kepler-vs-maxwell.md) — Story 0.4's hardware feature gap analysis.
 - [`docs/port/cuda-11.4-version-pins.md`](../../../docs/port/cuda-11.4-version-pins.md) — Story 0.3's version pin survey.
+- [`requirements/cuda_k80.txt`](../../../requirements/cuda_k80.txt) — references this directory and the pin in `CMakeLists.txt:302`.
