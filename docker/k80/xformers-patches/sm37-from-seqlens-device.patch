@@ -1,0 +1,32 @@
+diff --git a/xformers/ops/fmha/attn_bias.py b/xformers/ops/fmha/attn_bias.py
+index 78044f7..f342a86 100644
+--- a/xformers/ops/fmha/attn_bias.py
++++ b/xformers/ops/fmha/attn_bias.py
+@@ -551,6 +551,7 @@ class BlockDiagonalMask(AttentionBias):
+         cls,
+         q_seqlen: Sequence[int],
+         kv_seqlen: Optional[Sequence[int]] = None,
++        device: Optional[torch.device] = None,
+     ) -> "BlockDiagonalMask":
+         """Creates a :attr:`BlockDiagonalMask` from a list of tensors lengths for query and key/value.
+ 
+@@ -558,6 +559,8 @@ class BlockDiagonalMask(AttentionBias):
+             q_seqlen (Union[Sequence[int], torch.Tensor]): List or tensor of sequence lengths for query tensors
+             kv_seqlen (Union[Sequence[int], torch.Tensor], optional): List or tensor of sequence lengths for key/value.
+                     (Defaults to ``q_seqlen``.)
++            device (torch.device, optional): Device for the resulting seqstart tensors.
++                    Backported from later xformers releases for vLLM K80 fork.
+         Returns:
+             BlockDiagonalMask
+         """
+@@ -567,6 +570,10 @@ class BlockDiagonalMask(AttentionBias):
+             k_seqinfo = q_seqinfo
+         else:
+             k_seqinfo = _SeqLenInfo.from_seqlens(kv_seqlen)
++        if device is not None:
++            q_seqinfo.to(device)
++            if k_seqinfo is not q_seqinfo:
++                k_seqinfo.to(device)
+         return cls(q_seqinfo=q_seqinfo, k_seqinfo=k_seqinfo)
+ 
+     @classmethod

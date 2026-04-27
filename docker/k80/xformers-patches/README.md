@@ -53,6 +53,35 @@ CUDA_MINIMUM_COMPUTE_CAPABILITY: Tuple[int, int] = (3, 7)  # Tesla K80 (sm_37) b
 
 **Applies to:** XFormers v0.0.23.
 
+### `sm37-from-seqlens-device.patch` (Story #35 follow-up)
+
+Backports a `device=` keyword argument to `BlockDiagonalMask.from_seqlens` (and inherited `BlockDiagonalCausalMask.from_seqlens`) at `xformers/ops/fmha/attn_bias.py:550`:
+
+```python
+# Before (v0.0.23):
+def from_seqlens(cls, q_seqlen, kv_seqlen=None) -> "BlockDiagonalMask":
+    ...
+
+# After:
+def from_seqlens(cls, q_seqlen, kv_seqlen=None, device=None) -> "BlockDiagonalMask":
+    ...
+    if device is not None:
+        q_seqinfo.to(device)
+        if k_seqinfo is not q_seqinfo:
+            k_seqinfo.to(device)
+    return cls(q_seqinfo=q_seqinfo, k_seqinfo=k_seqinfo)
+```
+
+**Why:** vLLM's `vllm/attention/backends/xformers.py` (lines 686, 698, 707, 716) passes `device=query.device` as a keyword argument to `from_seqlens`. The kwarg was added in a later XFormers release; v0.0.23 doesn't accept it, so the call raises `TypeError: BlockDiagonalMask.from_seqlens() got an unexpected keyword argument 'device'` during the engine's profile run, before any kernel launches. Caught by k80-runtime workflow run 24971458508.
+
+**What this unlocks:** Allows vLLM's xformers backend dispatcher to construct attention masks on the GPU without modifying upstream vLLM code. Without it, the K80 fork would have to fork `vllm/attention/backends/xformers.py` to drop the kwarg in four call sites.
+
+**What this does NOT do:**
+- Does not change `_SeqLenInfo.to(device)`'s behaviour (already exists in v0.0.23). Just plumbs the device through `BlockDiagonalMask.from_seqlens`.
+- Does not affect `BlockDiagonalCausalLocalAttentionMask.from_seqlens` (line 816) — vLLM doesn't call it. If a future vLLM upgrade does, this patch would need a sibling extending the same kwarg there.
+
+**Applies to:** XFormers v0.0.23.
+
 ### `sm37-generate-kernels.patch` (Story #31)
 
 Adds `37` to the SM list at `xformers/csrc/attention/cuda/fmha/generate_kernels.py:23`:
