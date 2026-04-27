@@ -1,0 +1,228 @@
+name: K80 Phase 2 Context-Length Stress
+
+# Story 3.0 (gating measurement) per docs/port/flash-attn-fattn-vec-recon.md.
+# Sweeps --max-model-len with the current Phase 2 stack (XFormers cutlassF
+# backend) and records boot time, prefill latency, prompt token count, and
+# observed KV-cache size for each setting. Three branch outcomes feed the
+# Phase 3 go/no-go:
+#
+#   1. Hits ≥8K cleanly → Phase 3 has no headline prize on K80; close it.
+#   2. Hits a specific wall → Phase 3 targets that wall, not "implement FA
+#      from scratch."
+#   3. Wall is in framework rather than kernel (e.g., hardcoded buffer) →
+#      fix is a vLLM patch, not a new attention backend.
+#
+# TP=1 only — pre-authorized by the saved hardware-risky-ops rule. Multi-die
+# would shift to off-hours-only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      context_lengths:
+        description: "Comma-separated context lengths to sweep"
+        required: false
+        default: "2048,4096,8192,16384"
+        type: string
+      model:
+        description: "Model to serve"
+        required: false
+        default: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+        type: string
+      gpu_mem_util:
+        description: "GPU memory utilization (vLLM default 0.85)"
+        required: false
+        default: "0.85"
+        type: string
+      target_fill:
+        description: "Fraction of max_model_len to fill with prompt (0–1)"
+        required: false
+        default: "0.75"
+        type: string
+
+concurrency:
+  group: k80-hardware
+  cancel-in-progress: false
+
+jobs:
+  stress:
+    name: Context-length sweep
+    runs-on: [self-hosted, vllm]
+    env:
+      TP_SIZE: "1"
+      MODEL: ${{ inputs.model || 'TinyLlama/TinyLlama-1.1B-Chat-v1.0' }}
+      GPU_MEM_UTIL: ${{ inputs.gpu_mem_util || '0.85' }}
+      TARGET_FILL: ${{ inputs.target_fill || '0.75' }}
+      VLLM_K80_TRACE: "1"
+      VLLM_LOG_DIR: /tmp/k80-ci-logs
+      CONTEXT_LENGTHS: ${{ inputs.context_lengths || '2048,4096,8192,16384' }}
+      RESULTS_FILE: /tmp/k80-ci-logs/context-stress-results.tsv
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure runtime image matches branch SHA
+        working-directory: docker/k80
+        env:
+          BRANCH_SHA: ${{ github.sha }}
+        run: |
+          # Mirror of k80-runtime.yml's image-rebuild-on-SHA-drift logic so
+          # this workflow is independently reproducible against branch state.
+          IMAGE_SHA=$(docker inspect --format='{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+            vllm37-local:latest 2>/dev/null || echo "")
+          if [ "$IMAGE_SHA" = "$BRANCH_SHA" ]; then
+            echo "vllm37-local:latest already at branch SHA ($BRANCH_SHA); reusing image."
+            exit 0
+          fi
+          if [ -z "$IMAGE_SHA" ]; then
+            echo "Runtime image missing or has no revision label; building from current source."
+          else
+            echo "Runtime image is at $IMAGE_SHA but branch is $BRANCH_SHA; rebuilding."
+          fi
+          if ! docker image inspect vllm37-builder:latest >/dev/null 2>&1; then
+            echo "::error::vllm37-builder:latest not found. Run k80-build.yml or pull dogkeeper886/vllm37-builder."
+            exit 1
+          fi
+          make build-local
+
+      - name: Prepare log directory
+        run: |
+          mkdir -p "$VLLM_LOG_DIR"
+          chmod 777 "$VLLM_LOG_DIR"
+          # TSV header — one row per context length will append below.
+          printf 'context_length\tstatus\tboot_seconds\tprefill_seconds\tprompt_tokens\tcompletion_tokens\tkv_cache\tnote\n' > "$RESULTS_FILE"
+
+      - name: Sweep context lengths
+        working-directory: docker/k80
+        run: |
+          set +e  # keep going on per-iteration failure; record outcome and continue
+          IFS=',' read -ra LENGTHS <<< "$CONTEXT_LENGTHS"
+          OVERALL=0
+          for L in "${LENGTHS[@]}"; do
+            echo ""
+            echo "============================================"
+            echo "==  Context length: $L"
+            echo "============================================"
+            ITER_LOG="$VLLM_LOG_DIR/iter-L${L}.log"
+
+            # Build a prompt of approximately TARGET_FILL * L tokens. Rough
+            # heuristic ~3.5 chars/token for English text — vLLM reports the
+            # exact prompt_tokens in the response so the imprecision washes
+            # out. We over-shoot slightly and let vLLM reject if too long.
+            TARGET_TOKENS=$(awk -v L="$L" -v F="$TARGET_FILL" 'BEGIN { printf "%d", L * F }')
+            TARGET_CHARS=$((TARGET_TOKENS * 4))
+            PASSAGE="The quick brown fox jumps over the lazy dog. Sphinx of black quartz, judge my vow. "
+            # Build prompt by concatenation in awk (cheaper than a bash loop on 64KB).
+            PROMPT=$(awk -v target="$TARGET_CHARS" -v p="$PASSAGE" \
+              'BEGIN { s=""; while (length(s) < target) s = s p; print substr(s, 1, target) }')
+            echo "Generated prompt: ${#PROMPT} chars (~$TARGET_TOKENS target tokens)"
+
+            # Boot container with this max_model_len.
+            BOOT_START=$(date +%s)
+            MAX_MODEL_LEN=$L \
+            TP_SIZE=$TP_SIZE MODEL=$MODEL \
+            VLLM_K80_TRACE=$VLLM_K80_TRACE VLLM_LOG_DIR=$VLLM_LOG_DIR \
+            GPU_MEM_UTIL=$GPU_MEM_UTIL \
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d 2>&1 | tee -a "$ITER_LOG"
+
+            # Wait for ready, max 10 min.
+            READY=0; STATE="unknown"
+            for i in $(seq 1 120); do
+              CID=$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -q vllm 2>/dev/null)
+              if [ -n "$CID" ]; then
+                STATE=$(docker inspect --format='{{.State.Status}}' "$CID" 2>/dev/null || echo "missing")
+                if [ "$STATE" != "running" ]; then
+                  break
+                fi
+              fi
+              if curl -fsS --max-time 3 http://localhost:8000/v1/models >/dev/null 2>&1; then
+                READY=1
+                break
+              fi
+              sleep 5
+            done
+            BOOT_SECS=$(( $(date +%s) - BOOT_START ))
+
+            if [ "$READY" != "1" ]; then
+              echo "::warning::L=$L did not become ready within 600s (container state: $STATE)"
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --tail 200 --no-color >> "$ITER_LOG" 2>&1 || true
+              # Detect the most-likely root cause from logs.
+              NOTE="state=$STATE"
+              if grep -qiE "out of memory|cuda.*memory|cublas.*alloc" "$ITER_LOG"; then NOTE="OOM"; fi
+              if grep -qiE "max_model_len.*greater than|context.*too long" "$ITER_LOG"; then NOTE="ctx_reject"; fi
+              printf '%s\tBOOT_FAIL\t%s\t-\t-\t-\t-\t%s\n' "$L" "$BOOT_SECS" "$NOTE" >> "$RESULTS_FILE"
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v >>"$ITER_LOG" 2>&1 || true
+              OVERALL=1
+              continue
+            fi
+
+            # Capture vLLM's startup log lines that describe KV cache sizing.
+            KV_LINE=$(docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color 2>/dev/null \
+              | grep -iE "kv.cache|GPU.*memory.*available|num_gpu_blocks|num_cpu_blocks" \
+              | head -5 || true)
+            echo "KV cache log lines:"
+            printf '%s\n' "$KV_LINE"
+
+            # Pick a plausible KV-cache size string for the TSV. vLLM logs
+            # something like "GPU KV cache size: 12288 tokens" — store the
+            # token count if we can find it; otherwise mark unknown.
+            KV_TOKENS=$(printf '%s' "$KV_LINE" | grep -oE "GPU KV cache size: [0-9]+" | head -1 | grep -oE "[0-9]+" || true)
+            if [ -z "$KV_TOKENS" ]; then KV_TOKENS="unknown"; fi
+
+            # Send the long-context completion and time it.
+            PAYLOAD=$(jq -nc --arg model "$MODEL" --arg prompt "$PROMPT" \
+              '{model: $model, prompt: $prompt, max_tokens: 16, temperature: 0}')
+            PREFILL_START=$(date +%s.%N)
+            RESP=$(curl -fsS --max-time 600 http://localhost:8000/v1/completions \
+              -H "Content-Type: application/json" \
+              --data-binary "$PAYLOAD" 2>>"$ITER_LOG")
+            CURL_RC=$?
+            PREFILL_END=$(date +%s.%N)
+            PREFILL_SECS=$(awk -v s="$PREFILL_START" -v e="$PREFILL_END" 'BEGIN { printf "%.2f", e - s }')
+
+            if [ "$CURL_RC" != "0" ] || [ -z "$RESP" ]; then
+              echo "::warning::L=$L completion request failed (curl rc=$CURL_RC)"
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --tail 200 --no-color >> "$ITER_LOG" 2>&1 || true
+              NOTE="curl_rc=$CURL_RC"
+              if grep -qiE "out of memory|cuda.*memory" "$ITER_LOG"; then NOTE="OOM_at_request"; fi
+              printf '%s\tREQUEST_FAIL\t%s\t%s\t-\t-\t%s\t%s\n' "$L" "$BOOT_SECS" "$PREFILL_SECS" "$KV_TOKENS" "$NOTE" >> "$RESULTS_FILE"
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v >>"$ITER_LOG" 2>&1 || true
+              OVERALL=1
+              continue
+            fi
+
+            PROMPT_TOKENS=$(echo "$RESP" | jq -r '.usage.prompt_tokens // "?"')
+            COMPLETION_TOKENS=$(echo "$RESP" | jq -r '.usage.completion_tokens // "?"')
+            FINISH=$(echo "$RESP" | jq -r '.choices[0].finish_reason // "?"')
+            printf '%s\tOK\t%s\t%s\t%s\t%s\t%s\tfinish=%s\n' \
+              "$L" "$BOOT_SECS" "$PREFILL_SECS" "$PROMPT_TOKENS" "$COMPLETION_TOKENS" "$KV_TOKENS" "$FINISH" >> "$RESULTS_FILE"
+            echo "L=$L OK: boot=${BOOT_SECS}s prefill=${PREFILL_SECS}s prompt_tokens=$PROMPT_TOKENS kv_cache_tokens=$KV_TOKENS"
+
+            # Save full container log for the artifact, then tear down.
+            docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color >> "$ITER_LOG" 2>&1 || true
+            docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v >>"$ITER_LOG" 2>&1 || true
+          done
+
+          echo ""
+          echo "=================================="
+          echo "==  Sweep summary"
+          echo "=================================="
+          column -t -s $'\t' "$RESULTS_FILE"
+
+          # Workflow does not fail on per-iteration BOOT_FAIL/REQUEST_FAIL —
+          # those outcomes are the data we want. It only fails if every
+          # iteration failed (zero OK rows), which would indicate the runner
+          # or image is broken, not a context-length finding.
+          OK_COUNT=$(awk -F'\t' '$2=="OK"{c++} END{print c+0}' "$RESULTS_FILE")
+          echo "OK iterations: $OK_COUNT / $(( ${#LENGTHS[@]} ))"
+          if [ "$OK_COUNT" = "0" ]; then
+            echo "::error::No context length succeeded — likely a runner/image issue, not a kernel finding."
+            exit 1
+          fi
+
+      - name: Upload logs + results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k80-context-stress-results
+          path: /tmp/k80-ci-logs/
