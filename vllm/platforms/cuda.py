@@ -362,11 +362,28 @@ class CudaPlatformBase(Platform):
 
         # Backends for V0 engine
         # Kepler GPUs (sm < 60): use Torch SDPA backend.
-        # FlashAttention and xformers require sm_70+/sm_80+.
+        # Upstream FlashAttention and xformers require sm_70+/sm_80+.
+        #
+        # K80 fork (Phase 2 of issue #12): patched xformers v0.0.23 supports
+        # sm_37 via the patches in docker/k80/xformers-patches/. If xformers
+        # is importable, prefer it — its cutlassF op was verified
+        # bit-exact-vs-cuBLAS at the GEMM layer (Phase 1 PR #57) and
+        # numerically correct vs an eager-mode reference at the attention
+        # layer (Phase 2 PR #65 / Story #34, max_rel ~7e-5 on fp32). Fall
+        # back to SDPA when xformers is not installed so non-K80 builds and
+        # any future Kepler users without our patches still work.
         if not cls.has_device_capability(60):
-            logger.info(
-                "Using Torch SDPA attention backend for Kepler GPU (sm < 60).")
-            return "vllm.attention.backends.torch_sdpa.TorchSDPABackend"
+            try:
+                import xformers  # noqa: F401
+                logger.info(
+                    "Using XFormers attention backend for Kepler GPU "
+                    "(sm < 60, patched per K80 fork issue #12).")
+                return "vllm.attention.backends.xformers.XFormersBackend"
+            except ImportError:
+                logger.info(
+                    "Using Torch SDPA attention backend for Kepler GPU "
+                    "(sm < 60, xformers not installed).")
+                return "vllm.attention.backends.torch_sdpa.TorchSDPABackend"
 
         if selected_backend == _Backend.FLASHINFER:
             logger.info("Using FlashInfer backend.")
