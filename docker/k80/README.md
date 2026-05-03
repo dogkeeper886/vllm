@@ -48,7 +48,7 @@ cp .env.example .env
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `JOBS` | 4 | Parallel build jobs |
-| `VLLM_REPO` | dogkeeper886/vllm | GitHub repo for runtime build |
+| `VLLM_REPO` | dogkeeper886/vllm37 | GitHub repo for runtime build |
 | `VLLM_BRANCH` | main | Git branch to clone |
 | `MODEL` | TinyLlama-1.1B | Model to serve |
 | `TP_SIZE` | 1 | Tensor parallel size (see safety note below before raising) |

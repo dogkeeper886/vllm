@@ -333,5 +333,5 @@ This sits alongside the Phase 2 chain (XFormers / cutlassF) as a *second* backen
 - Issue [#108][o-108] — FA validation phase
 - [Run 24960034243][o-run] — bit-exact validation
 
-[epic]: https://github.com/dogkeeper886/vllm/issues/12
-[phase3-portal]: https://github.com/dogkeeper886/vllm/issues/16
+[epic]: https://github.com/dogkeeper886/vllm37/issues/12
+[phase3-portal]: https://github.com/dogkeeper886/vllm37/issues/16

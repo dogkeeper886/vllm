@@ -4,8 +4,8 @@
 **flash-attention commit pinned for citations:** `ac6f2eb5413748c68192aa384a40a38d60ad6abd` (Dao-AILab/flash-attention `main`, 2026-04-23).
 **Methodology:** every claim cites flash-attention source by `file:line`. No claim without a citation.
 
-[issue-20]: https://github.com/dogkeeper886/vllm/issues/20
-[epic]: https://github.com/dogkeeper886/vllm/issues/12
+[issue-20]: https://github.com/dogkeeper886/vllm37/issues/20
+[epic]: https://github.com/dogkeeper886/vllm37/issues/12
 
 ---
 
@@ -23,7 +23,7 @@ This doc answers Story 0.2's questions for FlashAttention:
 8. CUDA 11.4 compatibility risk.
 9. **Decision: Phase 3 port path (3.2a) or rewrite path (3.2b)?**
 
-[s01]: https://github.com/dogkeeper886/vllm/issues/19
+[s01]: https://github.com/dogkeeper886/vllm37/issues/19
 
 ## 2. Repo layout
 
@@ -254,13 +254,13 @@ The K80 fork pinned to CUDA 11.4 because newer CUDA toolkits may have dropped Ke
 
 Even if Story 0.3 finds an older FA version that supports CUDA 11.4, the SM-gate / tensor-core wall in §3 and §4 still applies — older FA still uses CUTLASS tensor-core MMA atoms. So this is "necessary but not sufficient": getting an older FA to build is a precondition for any port path; it does not by itself solve the kernel problem.
 
-[s03]: https://github.com/dogkeeper886/vllm/issues/21
+[s03]: https://github.com/dogkeeper886/vllm37/issues/21
 
 ## 10. Recommendation for Phase 3 — port vs rewrite
 
 **Recommendation: rewrite path (Story [#38][s32b], 3.2b). Confidence: high.**
 
-[s32b]: https://github.com/dogkeeper886/vllm/issues/38
+[s32b]: https://github.com/dogkeeper886/vllm37/issues/38
 
 The reasoning, anchored in source:
 
@@ -296,7 +296,7 @@ Story 3.2b explicitly conflicts with issue #2's "Explicitly skipping → Writing
 
 3. **The Turing fork.** [flash-attention-turing](https://github.com/ssiu/flash-attention-turing) is referenced in FA's README as the pre-Ampere path. **Story [#23][s05] (prior art search) needs to examine it.** If the Turing fork has already done the work of cleaning up the SM80-only assumptions in the build and providing a fp16-on-Turing path, parts of that work might transplant — although Turing has tensor cores and K80 does not, so the kernel itself will not transfer.
 
-[s05]: https://github.com/dogkeeper886/vllm/issues/23
+[s05]: https://github.com/dogkeeper886/vllm37/issues/23
 
 ## 12. Implications for Phase 3 stories
 
