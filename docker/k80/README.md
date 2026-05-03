@@ -144,6 +144,20 @@ docker/k80/
 └── README.md               # This file
 ```
 
+## CI
+
+K80 workflows live under `.github/workflows/k80-*.yml`, run on the self-hosted
+runner, and are manually triggered (`workflow_dispatch`).
+
+`k80-pipeline.yml` composes `k80-build.yml` + `k80-runtime.yml` via
+`workflow_call`. So `gh run list --workflow="K80 Docker Build"` showing zero
+direct runs does NOT mean the workflow is unused — pipeline invocations surface
+under the *caller* (`K80 Full Pipeline`).
+
+Other workflows (`k80-host-info`, `k80-cutlass-repro`, `k80-xformers-build`,
+`k80-context-stress`) are standalone and exercise specific stories — see each
+file's header comment for purpose and related issue numbers.
+
 ## Key Build Flags
 
 - `TORCH_CUDA_ARCH_LIST="3.7"` - Target K80 compute capability
