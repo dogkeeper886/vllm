@@ -8,8 +8,8 @@
 
 **Methodology:** every version claim cited by commit SHA, tag, or release URL.
 
-[issue-21]: https://github.com/dogkeeper886/vllm/issues/21
-[epic]: https://github.com/dogkeeper886/vllm/issues/12
+[issue-21]: https://github.com/dogkeeper886/vllm37/issues/21
+[epic]: https://github.com/dogkeeper886/vllm37/issues/12
 
 ---
 
@@ -245,4 +245,4 @@ I won't roll those edits into Story 0.1's doc directly (one-story-per-PR discipl
 
 **End of Story 0.3 deliverable.** Story 0.4 (Kepler hardware reality check, [#22][s04]) is the next pickup. It quantifies what sm_37 actually has vs sm_50 — feeding the assumption underlying Story 0.1 §5 that the SIMT path's hardware requirements are met by Kepler.
 
-[s04]: https://github.com/dogkeeper886/vllm/issues/22
+[s04]: https://github.com/dogkeeper886/vllm37/issues/22

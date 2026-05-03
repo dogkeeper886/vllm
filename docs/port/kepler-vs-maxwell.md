@@ -11,10 +11,10 @@
 - CUDA Toolkit 11.4 release notes (already cited in [Story 0.3][story03])
 - Empirical: `nvidia-smi` + `cat /etc/os-release` from the K80 self-hosted runner via the [`k80-host-info`][run-host-info] workflow run on 2026-04-25
 
-[issue-22]: https://github.com/dogkeeper886/vllm/issues/22
-[epic]: https://github.com/dogkeeper886/vllm/issues/12
-[story03]: https://github.com/dogkeeper886/vllm/blob/main/docs/port/cuda-11.4-version-pins.md
-[run-host-info]: https://github.com/dogkeeper886/vllm/actions/runs/24933324546
+[issue-22]: https://github.com/dogkeeper886/vllm37/issues/22
+[epic]: https://github.com/dogkeeper886/vllm37/issues/12
+[story03]: https://github.com/dogkeeper886/vllm37/blob/main/docs/port/cuda-11.4-version-pins.md
+[run-host-info]: https://github.com/dogkeeper886/vllm37/actions/runs/24933324546
 
 **Methodology:** every claim cites either an NVIDIA URL with a quote (or section reference), the K80 runner's own output, or already-cited code from prior stories. Where NVIDIA URLs returned 404 at fetch time, archive URLs are used and the breakage is flagged.
 
@@ -150,7 +150,7 @@ This information also bounds the long-context unlock claim of Story #54. Phase-1
 
 So on the smoke-test workload, ~1.64 GiB stayed free at peak. KV cache consumed about 5.07 GiB at the configured `gpu_memory_utilization=0.85`. Larger models would shift this further — that's the headroom flash-style attention would buy back at long contexts. The bottleneck is per-die VRAM, not attention algorithm; flash-style shifts the cost from O(N²) activations to O(N), which matters most when context length is the binding constraint.
 
-[run-24897047481]: https://github.com/dogkeeper886/vllm/actions/runs/24897047481
+[run-24897047481]: https://github.com/dogkeeper886/vllm37/actions/runs/24897047481
 
 ## 10. Bottom line for the port
 
@@ -206,4 +206,4 @@ The one caveat — `__shfl_sync` semantics differ pre-Volta vs Volta+ — is exa
 
 **End of Story 0.4 deliverable.** Story 0.5 (existing prior art search, [#23][s05]) is the next pickup — looks for sm_37 forks of CUTLASS / FA / XFormers, or relevant blog posts / papers, before any more design work happens.
 
-[s05]: https://github.com/dogkeeper886/vllm/issues/23
+[s05]: https://github.com/dogkeeper886/vllm37/issues/23

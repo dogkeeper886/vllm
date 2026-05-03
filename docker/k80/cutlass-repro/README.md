@@ -2,9 +2,9 @@
 
 Minimal CUTLASS GEMM that dispatches through `cutlass::arch::Sm37` (the tag added by [PR #54][pr54], Story #25) and runs on a Tesla K80. Closes Phase 1 Story [#28][issue-28] of the K80 attention port epic [#12][epic].
 
-[pr54]: https://github.com/dogkeeper886/vllm/pull/54
-[issue-28]: https://github.com/dogkeeper886/vllm/issues/28
-[epic]: https://github.com/dogkeeper886/vllm/issues/12
+[pr54]: https://github.com/dogkeeper886/vllm37/pull/54
+[issue-28]: https://github.com/dogkeeper886/vllm37/issues/28
+[epic]: https://github.com/dogkeeper886/vllm37/issues/12
 
 ## What this proves
 
@@ -12,7 +12,7 @@ Minimal CUTLASS GEMM that dispatches through `cutlass::arch::Sm37` (the tag adde
 2. **The compiled binary actually runs** on Tesla K80 hardware (driver R470 / sm_37 / Kepler GK210). Build success ≠ runtime success on this hardware ([Story 0.5 §3.7][story05] flagged this as the most actionable finding from prior art).
 3. **Numerical output matches expected** — A=ones (256×256), B=ones (256×256) ⇒ each element of D should equal K=256.
 
-[story05]: https://github.com/dogkeeper886/vllm/blob/main/docs/port/prior-art.md
+[story05]: https://github.com/dogkeeper886/vllm37/blob/main/docs/port/prior-art.md
 
 ## Files
 
@@ -30,7 +30,7 @@ Minimal CUTLASS GEMM that dispatches through `cutlass::arch::Sm37` (the tag adde
 The `k80-cutlass-repro` workflow does the full pipeline: builds the binary on the K80 self-hosted runner, executes it, and uploads the output as an artifact.
 
 ```bash
-gh workflow run k80-cutlass-repro.yml --repo dogkeeper886/vllm
+gh workflow run k80-cutlass-repro.yml --repo dogkeeper886/vllm37
 ```
 
 The workflow runs on a single K80 die, no NCCL, no multi-die — equivalent risk to a TP=1 vLLM smoke test, so it's not gated by the weekend rule for hardware-risky operations.
@@ -84,7 +84,7 @@ RESULT       : PASS
 
 Exit code 0 = pass. Non-zero = either CUDA runtime failure (exit 2), CUTLASS dispatch failure (exit 3), or numerical disagreement / tolerance violation (exit 1).
 
-[run-28]: https://github.com/dogkeeper886/vllm/actions/runs/24946197232
+[run-28]: https://github.com/dogkeeper886/vllm37/actions/runs/24946197232
 
 ## What this does NOT do
 
@@ -92,7 +92,7 @@ Exit code 0 = pass. Non-zero = either CUDA runtime failure (exit 2), CUTLASS dis
 - **Does not patch the vLLM build.** Current vLLM K80 build still uses `VLLM_BUILD_LEGACY_CUDA=ON` (`CMakeLists.txt:273`) to skip CUTLASS. This reproducer is standalone — it proves the kernel path works in isolation. Story [#30][story30] handles the build-graph integration.
 - **Does not exercise the FA-style attention algorithm.** Just GEMM. Story 3.x will do attention-shaped work after Phase 1 closes.
 
-[story30]: https://github.com/dogkeeper886/vllm/issues/30
+[story30]: https://github.com/dogkeeper886/vllm37/issues/30
 
 ## Hardware safety notes
 

@@ -10,7 +10,7 @@ The full set of changes needed to support sm_37 is small enough that maintaining
 
 If patch volume grows to where rebasing is painful, Story #30 will revisit by vendoring a CUTLASS fork.
 
-[epic]: https://github.com/dogkeeper886/vllm/issues/12
+[epic]: https://github.com/dogkeeper886/vllm37/issues/12
 [llama-cpp-kepler]: https://github.com/fcheung2888/llama.cpp-kepler
 
 ## Target CUTLASS versions

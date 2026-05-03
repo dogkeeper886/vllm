@@ -2,8 +2,8 @@
 
 End-to-end build of XFormers v0.0.23 from source, against patched CUTLASS, targeting Tesla K80 (sm_37). Closes Phase 2 Story [#33][issue-33] of the K80 attention-port epic [#12][epic].
 
-[issue-33]: https://github.com/dogkeeper886/vllm/issues/33
-[epic]: https://github.com/dogkeeper886/vllm/issues/12
+[issue-33]: https://github.com/dogkeeper886/vllm37/issues/33
+[epic]: https://github.com/dogkeeper886/vllm37/issues/12
 
 ## What this proves
 
@@ -14,10 +14,10 @@ When the workflow runs green:
 3. **The CC gate patch** (Story [#32][s32]) lowers `AttentionOpBase.CUDA_MINIMUM_COMPUTE_CAPABILITY` from `(5, 0)` to `(3, 7)` so the dispatcher accepts K80 at runtime.
 4. **The resulting xformers installs cleanly** into the K80 builder image's Python 3.10 + PyTorch 2.0.1 environment.
 
-[s25]: https://github.com/dogkeeper886/vllm/issues/25
-[s29]: https://github.com/dogkeeper886/vllm/issues/29
-[s31]: https://github.com/dogkeeper886/vllm/issues/31
-[s32]: https://github.com/dogkeeper886/vllm/issues/32
+[s25]: https://github.com/dogkeeper886/vllm37/issues/25
+[s29]: https://github.com/dogkeeper886/vllm37/issues/29
+[s31]: https://github.com/dogkeeper886/vllm37/issues/31
+[s32]: https://github.com/dogkeeper886/vllm37/issues/32
 
 ## Files
 
@@ -34,7 +34,7 @@ When the workflow runs green:
 The `k80-xformers-build` workflow runs the full pipeline on the self-hosted K80 runner.
 
 ```bash
-gh workflow run k80-xformers-build.yml --repo dogkeeper886/vllm
+gh workflow run k80-xformers-build.yml --repo dogkeeper886/vllm37
 ```
 
 **Expected runtime:** 30–60 minutes. XFormers v0.0.23's autogen produces a lot of kernels, and adding `sm_37` adds ~20% more compilation. NVCC compilation on the K80 runner's CPUs is the bottleneck (the build itself does not touch the GPU).
@@ -71,8 +71,8 @@ RESULT: PASS — xformers built and imports cleanly
 - **Does not benchmark.** Story 5.x.
 - **Does not run XFormers' full pytest suite.** The smoke test (`test_cutlass_fp32.py`, Story #34) is a hand-rolled minimal proof. Running `xformers/tests/test_mem_eff_attention.py` end-to-end is plausible additional coverage but typically reports many skips for fp16/bf16/sm_70+ paths that don't apply on K80; treat as informational if it ever lands.
 
-[s34]: https://github.com/dogkeeper886/vllm/issues/34
-[s41]: https://github.com/dogkeeper886/vllm/issues/41
+[s34]: https://github.com/dogkeeper886/vllm37/issues/34
+[s41]: https://github.com/dogkeeper886/vllm37/issues/41
 
 ## Hardware safety notes
 

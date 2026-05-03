@@ -3,8 +3,8 @@
 **Story:** [#23][issue-23] (Phase 0 of epic [#12][epic])
 **Methodology:** every project / paper / post cited by URL. Negative results are documented explicitly so future researchers don't repeat the same searches expecting different results.
 
-[issue-23]: https://github.com/dogkeeper886/vllm/issues/23
-[epic]: https://github.com/dogkeeper886/vllm/issues/12
+[issue-23]: https://github.com/dogkeeper886/vllm37/issues/23
+[epic]: https://github.com/dogkeeper886/vllm37/issues/12
 
 ---
 
@@ -63,7 +63,7 @@ XFormers' own [`README.md`](https://github.com/facebookresearch/xformers/blob/ma
 
 ### 2.4 vLLM siblings
 
-This fork (`dogkeeper886/vllm`) appears to be the only public **Kepler** vLLM fork. Searched:
+This fork (`dogkeeper886/vllm37`) appears to be the only public **Kepler** vLLM fork. Searched:
 
 - `gh search repos vllm-kepler` / `vllm-K80` / `vllm-sm37` / `vllm-sm_37` / `vllm-pre-Volta` → 0 hits
 - `gh search code "compute_37" --owner vllm-project` → 0 hits
@@ -101,7 +101,7 @@ Status: active, last push 2026-03-29. License: not declared (upstream llama.cpp 
 
 URL: https://github.com/dogkeeper886/ollama37
 
-This is the user's own K80-targeting Ollama fork (mentioned in `CLAUDE.md` and study plan issue [#2](https://github.com/dogkeeper886/vllm/issues/2)). Not external prior art, but listed here for completeness because:
+This is the user's own K80-targeting Ollama fork (mentioned in `CLAUDE.md` and study plan issue [#2](https://github.com/dogkeeper886/vllm37/issues/2)). Not external prior art, but listed here for completeness because:
 
 - It already pins **the same toolchain we use** (CUDA 11.4 / GCC 10 / driver 470, on Rocky Linux). The K80 builder image in `docker/k80/` here is direct kin.
 - It already has a working CI flow on K80 hardware (the same self-hosted runner backing this fork).
@@ -286,4 +286,4 @@ The epic's plan from Phase 0 stories 0.1–0.4 is correct in scope. **No finding
 
 **End of Story 0.5 deliverable.** Story 0.6 (consolidate findings + GO/NO-GO, [#24][s06]) is the next pickup — the gate where all of Phase 0's recon outputs get synthesized into a final feasibility recommendation.
 
-[s06]: https://github.com/dogkeeper886/vllm/issues/24
+[s06]: https://github.com/dogkeeper886/vllm37/issues/24

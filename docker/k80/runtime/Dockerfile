@@ -12,7 +12,7 @@
 ARG BUILDER_IMAGE=vllm37-builder
 FROM ${BUILDER_IMAGE}
 
-ARG VLLM_REPO=https://github.com/dogkeeper886/vllm.git
+ARG VLLM_REPO=https://github.com/dogkeeper886/vllm37.git
 ARG VLLM_BRANCH=main
 ARG MAX_JOBS=4
 

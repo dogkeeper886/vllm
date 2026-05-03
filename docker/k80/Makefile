@@ -16,7 +16,7 @@ BUILDER_IMAGE  ?= vllm37-builder
 RUNTIME_IMAGE  ?= vllm37
 RUNTIME_LOCAL  ?= vllm37-local
 JOBS           ?= 4
-VLLM_REPO      ?= https://github.com/dogkeeper886/vllm.git
+VLLM_REPO      ?= https://github.com/dogkeeper886/vllm37.git
 VLLM_BRANCH    ?= main
 # Host dir bind-mounted into the container at /var/log/vllm for vllm + NCCL
 # logs. Must exist and be writable before `docker compose up` — otherwise

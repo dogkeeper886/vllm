@@ -4,8 +4,8 @@
 **CUTLASS commit pinned for citations:** `7a9fe055cb69ab2de605a0cf7dbb33f27833f7f3` (NVIDIA/cutlass `main`, 2026-04-24).
 **Methodology:** every claim cites CUTLASS source by `file:line`. No claim without a citation. Reasoning from upstream comments alone is not sufficient evidence — the K80 fork itself proves vLLM's "K80 cannot run" comment was wrong, so that pattern is the rule for this whole epic.
 
-[issue-19]: https://github.com/dogkeeper886/vllm/issues/19
-[epic]: https://github.com/dogkeeper886/vllm/issues/12
+[issue-19]: https://github.com/dogkeeper886/vllm37/issues/19
+[epic]: https://github.com/dogkeeper886/vllm37/issues/12
 
 ---
 
@@ -23,8 +23,8 @@ This doc answers Story 0.1's questions for CUTLASS:
 
 These answers feed into Phase 1 stories [#25][s11]–[#30][s16] (CUTLASS sm_37 enablement). They do **not** by themselves justify GO on Phase 1 — that's Story 0.6's call after all Phase 0 reconnaissance is in.
 
-[s11]: https://github.com/dogkeeper886/vllm/issues/25
-[s16]: https://github.com/dogkeeper886/vllm/issues/30
+[s11]: https://github.com/dogkeeper886/vllm37/issues/25
+[s16]: https://github.com/dogkeeper886/vllm37/issues/30
 
 ## 2. Files / locations summary
 
@@ -276,7 +276,7 @@ NVCC has supported sm_37 codegen since CUDA 6.0 and continues to support it thro
 
 CUTLASS is largely header-only. The build artifact for our purposes is just the propagated arch flag — there is nothing to gate at the `cutlass/` library level.
 
-[s03]: https://github.com/dogkeeper886/vllm/issues/21
+[s03]: https://github.com/dogkeeper886/vllm37/issues/21
 
 ## 9. Open questions / unknowns / forward risks
 
@@ -294,9 +294,9 @@ These are not blockers for Story 0.6 (consolidation), but they are things this d
 
 6. **Are there CUTLASS examples of pre-Maxwell forks?** Story [#23][s05] (prior art) covers this. If somebody has already done Sm37 in a fork, even a half-finished one, we save weeks.
 
-[s02]: https://github.com/dogkeeper886/vllm/issues/20
-[s05]: https://github.com/dogkeeper886/vllm/issues/23
-[s14]: https://github.com/dogkeeper886/vllm/issues/28
+[s02]: https://github.com/dogkeeper886/vllm37/issues/20
+[s05]: https://github.com/dogkeeper886/vllm37/issues/23
+[s14]: https://github.com/dogkeeper886/vllm37/issues/28
 
 ## 10. Implications for Phase 1 (CUTLASS-only)
 
@@ -323,7 +323,7 @@ This story examined CUTLASS in isolation. Its conclusions are limited to CUTLASS
 
 The methodology rule applied to my own work: my [PR-review claim][assumption-correction] that "porting XFormers means porting CUTLASS itself" was assumption-driven. This story revises only the CUTLASS half. The XFormers / FA halves remain to be checked the same way.
 
-[assumption-correction]: https://github.com/dogkeeper886/vllm/issues/12
+[assumption-correction]: https://github.com/dogkeeper886/vllm37/issues/12
 
 ---
 
