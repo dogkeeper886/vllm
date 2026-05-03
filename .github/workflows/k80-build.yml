@@ -36,6 +36,10 @@ jobs:
   build:
     name: Build vllm37-local image
     runs-on: [self-hosted, vllm]
+    # Cap so a stuck build can't hold the k80-hardware concurrency lock
+    # indefinitely. 60 min covers the typical cached-builder path; 180 min
+    # covers the rare rebuild_builder=true full builder rebuild (~120 min).
+    timeout-minutes: ${{ inputs.rebuild_builder && 180 || 60 }}
     env:
       BUILDER_IMAGE: vllm37-builder
       BUILDER_SOURCE: dogkeeper886/vllm37-builder:latest
@@ -45,7 +49,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
       - name: Ensure builder image exists
         run: |

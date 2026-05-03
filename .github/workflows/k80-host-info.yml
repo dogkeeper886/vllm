@@ -8,9 +8,9 @@ name: K80 Host Info
 on:
   workflow_dispatch:
 
-concurrency:
-  group: k80-hardware
-  cancel-in-progress: false
+# No concurrency group: this workflow makes no GPU calls (pure nvidia-smi /
+# nvcc / OS-info read), so it has no business waiting on the k80-hardware
+# lock when a long compute job is running.
 
 jobs:
   info:
